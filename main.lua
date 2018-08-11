@@ -12,17 +12,19 @@ local gCellBombColorExploding = { 0.8, 0.4, 0.15, 1.0 }
 local gGridSize = 16
 local gCurrLevel = 0
 local gGameStarted = false
-local gCurrBombSupply = 3
-local gBombDurUntilExplode = 3
+local gBombDurUntilExplode = 0.7
 local gBombExplosionDur = 1.0
 local gDurUntilClutterVanquished = 1.0
 
 -- num squares bomb will explode on each axis,
 -- including the square on which it is laid
-local gCurrBombSpread = 5
+local gCurrBombSpread = 7 -- odd numbers only
+local gCurrBombSupply = 3
 
 local gMousehoverCellX = 0
 local gMousehoverCellY = 0
+
+local gShouldAdvanceLevel = false
 
 -- Use a square grid of tables, each table has a type "t".
 -- Each type has unique table data associated with it
@@ -85,6 +87,22 @@ function updateGame(dt)
       tryToMarkCollision(bk, ck)
     end
   end
+
+  if gShouldAdvanceLevel and allSpotsEmpty() then -- (wait for all bombs to explode)
+    advanceOneLevel()
+  end
+end
+
+function allSpotsEmpty()
+  for x = 1, G.size_x do
+    for y = 1, G.size_y do
+      local cell_data = G:get_cell(x, y)
+      if cell_data.t ~= "-" then
+        return false
+      end
+    end
+  end
+  return true
 end
 
 function tryToMarkCollision(bk, ck)
@@ -123,9 +141,12 @@ function updateBomb(b, dt)
     b.time_until_explode = b.time_until_explode - dt
   elseif b.time_since_exploded > 0 then
     b.time_since_exploded = b.time_since_exploded - dt
+    if not b.exploded then
+      b.exploded = true
+      gCurrBombSupply = gCurrBombSupply + 1
+    end
   else
     b.t = "-"
-    gCurrBombSupply = gCurrBombSupply + 1
   end
 end
 
@@ -144,17 +165,15 @@ function drawEmpty(x, y, e)
 end
 
 function drawBomb(x, y, b)
-  if b.time_until_explode > 2 then
-    col = deepCopy(gCellBombColorLaid)
+  local col = deepCopy(gCellBombColorLaid)
+  if b.time_until_explode > (2/3) * gBombDurUntilExplode then
     love.graphics.setColor(col)
     love.graphics.rectangle("fill", x * gSquareW, y * gSquareW, gSquareW, gSquareW)
-  elseif b.time_until_explode > 1 then
-    col = deepCopy(gCellBombColorLaid)
+  elseif b.time_until_explode > (1/3) * gBombDurUntilExplode then
     col[4] = 0.75
     love.graphics.setColor(col)
     love.graphics.rectangle("fill", x * gSquareW, y * gSquareW, gSquareW, gSquareW)
   elseif b.time_until_explode > 0 then
-    col = deepCopy(gCellBombColorLaid)
     col[4] = 0.5
     love.graphics.setColor(col)
     love.graphics.rectangle("fill", x * gSquareW, y * gSquareW, gSquareW, gSquareW)
@@ -162,15 +181,16 @@ function drawBomb(x, y, b)
     col = deepCopy(gCellBombColorExploding)
     col[4] = col[4] - (col[4] * (1.0 - (b.time_since_exploded / gBombExplosionDur)))
     love.graphics.setColor(col)
+    -- draw spread
     for x_candidate = (x - ((gCurrBombSpread - 1) / 2)), (x + ((gCurrBombSpread - 1) / 2)) do
-      if G:is_valid(x_candidate, y) then
+      if G:is_valid(x_candidate + 1, y + 1) then
         love.graphics.rectangle("fill", x_candidate * gSquareW, y * gSquareW, gSquareW, gSquareW)
       end
     end
     for y_candidate = (y - ((gCurrBombSpread - 1) / 2)), (y + ((gCurrBombSpread - 1) / 2)) do
       if y_candidate == y then
-        -- do nothing, we already drew this on horizontal pass
-      elseif G:is_valid(y_candidate, y) then
+        -- don't draw center
+      elseif G:is_valid(y_candidate + 1, y + 1) then
         love.graphics.rectangle("fill", x * gSquareW, y_candidate * gSquareW, gSquareW, gSquareW)
       end
     end
@@ -232,6 +252,8 @@ function love.draw()
     drawAllClutters()
     drawBombs()
     drawCursor()
+    love.graphics.print(gCurrBombSupply, gGridSize * gSquareW + 20, gSquareW / 2 - 5)
+    love.graphics.print(math.floor(gCurrBombSpread / 2), gGridSize * gSquareW + 20, 2 * (gSquareW / 2) - 5)
   end
 end
 
@@ -253,20 +275,20 @@ function checkLevelCompleted()
   end
 
   if completed then
-    advanceOneLevel()
+    gShouldAdvanceLevel = true
   end
 end
 
 function advanceOneLevel()
   gCurrLevel = gCurrLevel + 1
 
-  -- todo: algorithm for clutter laying each new level
-  spawnClutter(1, 1)
-  spawnClutter(16, 16)
-  spawnClutter(16, 1)
-  spawnClutter(1, 16)
+  -- todo: lay each new level properly
+  spawnClutter(9, 5)
+  spawnClutter(6, 7)
+  spawnClutter(9, 10)
 
   gCurrBombSupply = 3
+  gShouldAdvanceLevel = false
 end
 
 function love.mousepressed(x, y, button)
@@ -305,8 +327,8 @@ end
 function tryToLayBomb(x, y)
   isSpaceEmpty = G:get_cell(x, y).t == "-"
   playerHasBombsLeft = gCurrBombSupply > 0
-  if isSpaceEmpty and playerHasBombsLeft then
-    G:set_cell(x, y, { t = "B", xpos = x, ypos = y, time_until_explode = gBombDurUntilExplode, time_since_exploded = gBombExplosionDur })
+  if isSpaceEmpty and playerHasBombsLeft and not gShouldAdvanceLevel then
+    G:set_cell(x, y, { t = "B", xpos = x, ypos = y, exploded = false, time_until_explode = gBombDurUntilExplode, time_since_exploded = gBombExplosionDur })
     gCurrBombSupply = gCurrBombSupply - 1
   end
 end
