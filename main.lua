@@ -3,7 +3,6 @@ require "grid"
 -- GFX Globals
 local instructions = "Click to clean up. Keys to select ability. Right click to use it."
 local gSquareW = 32
-local gCellEmptyColor = { 0.1, 0.1, 0.1, 1.0 }
 local gCellTrashColor = { 0.5, 0.5, 0.5, 1.0 }
 local gCellBombColorLaid = { 0.8, 0.3, 0.3, 1.0 }
 local gCellBombColorExploding = { 0.8, 0.4, 0.15, 1.0 }
@@ -135,6 +134,8 @@ end
 
 function love.load()
   math.randomseed(os.time())
+  gImgFloor = love.graphics.newImage("sand.png")
+  gImgTrash = love.graphics.newImage("trash.png")
 end
 
 function love.update(dt)
@@ -255,9 +256,8 @@ function updateTrash(c, dt)
   end
 end
 
-function drawEmpty(x, y, e)
-  love.graphics.setColor(gCellEmptyColor)
-  love.graphics.rectangle("fill", x * gSquareW, y * gSquareW, gSquareW, gSquareW)
+function drawFloor(x, y, e)
+  love.graphics.draw(gImgFloor, x * gSquareW, y * gSquareW)
 end
 
 function drawBomb(x, y, b)
@@ -299,14 +299,14 @@ function drawTrash(x, y, c)
     col[4] = col[4] - (col[4] * (1.0 - (c.time_until_vanquished / gDurUntilTrashVanquished)))
   end
   love.graphics.setColor(col)
-  love.graphics.rectangle("fill", x * gSquareW, y * gSquareW, gSquareW, gSquareW)
+  love.graphics.draw(gImgTrash, x * gSquareW, y * gSquareW)
 end
 
 function drawBg()
   for x = 1, G.size_x do
     for y = 1, G.size_y do
       local cell_data = G:get_cell(x, y)
-        drawEmpty(x-1, y-1, cell_data)
+      drawFloor(x-1, y-1, cell_data)
     end
   end
 end
