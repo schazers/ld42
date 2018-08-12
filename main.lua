@@ -20,8 +20,9 @@ local gDurUntilStuffVanquished = gBombExplosionDur
 local gCurrPhase = 1
 local gTrashNeededToLevelUp = 256
 local gNumAutobombsPerRound = 0
-local gDurBetweenAutobombRounds = 3 -- seconds
+local gDurBetweenAutobombRounds = 5 -- seconds
 local gTimeSinceLastRoundOfAutobombs = 0 -- seconds
+MAX_NUM_AUTOBOMBS = 3
 
 -- num squares bomb will explode on each axis,
 -- including the square on which it is laid
@@ -46,6 +47,9 @@ local gTrashCleanedCount = 0
 local gTotalElapsedTime = 0
 local gElapsedTimeCurrGame = 0
 
+-- torture people
+TIME_OF_ENVIRONMENT = 100 -- seconds in
+
 -- Use a square grid of tables, each table has a type "t".
 -- Each type has unique table data associated with it
 -- Types:
@@ -61,8 +65,8 @@ INITIAL_NEW_SPREAD_FACTOR = 0.02
 INITIAL_ADJACENT_SPREAD_FACTOR = 0.5
 
 -- todo: set these just right
-ADJACENT_SPREAD_FACTOR_MAX = 10.0
-NEW_SPREAD_FACTOR_MAX = 0.5
+gAdjacentSpreadFactorMax = 10.0
+gNewSpreadFactorMax = 0.5
 
 function love.load()
   math.randomseed(os.time())
@@ -107,6 +111,9 @@ function startGame()
   gTrashCleanedCount = 0
   gCurrBombSupply = 0
   gElapsedTimeCurrGame = 0
+
+  gAdjacentSpreadFactorMax = 10.0
+  gNewSpreadFactorMax = 0.5
 
   -- set up grid data structure
   fillGridWithEmptySpots()
@@ -279,14 +286,14 @@ function handleSpawning(dt)
   if (gTimeSinceLastDifficultyIncrease > gDurOfEachDifficultyLvl) then
     gNewTrashSpreadFactor = gNewTrashSpreadFactor + (gNewTrashSpreadFactor / 32)
 
-    if gNewTrashSpreadFactor > NEW_SPREAD_FACTOR_MAX then
-      gNewTrashSpreadFactor = NEW_SPREAD_FACTOR_MAX
+    if gNewTrashSpreadFactor > gNewSpreadFactorMax then
+      gNewTrashSpreadFactor = gNewSpreadFactorMax
     end
 
     gAdjacentTrashSpreadFactor = gAdjacentTrashSpreadFactor + (gAdjacentTrashSpreadFactor / 8)
 
-    if gAdjacentTrashSpreadFactor > ADJACENT_SPREAD_FACTOR_MAX then
-      gAdjacentTrashSpreadFactor = ADJACENT_SPREAD_FACTOR_MAX
+    if gAdjacentTrashSpreadFactor > gAdjacentSpreadFactorMax then
+      gAdjacentTrashSpreadFactor = gAdjacentSpreadFactorMax
     end
 
     gTimeSinceLastDifficultyIncrease = 0
@@ -327,7 +334,7 @@ function updateGame(dt)
   clearTable(gLitBombs)
   clearTable(gStuff)
 
-  if gElapsedTimeCurrGame > 40 and gElapsedTimeCurrGame < 40.2 then
+  if gElapsedTimeCurrGame > TIME_OF_ENVIRONMENT and gElapsedTimeCurrGame < TIME_OF_ENVIRONMENT + 0.2 then
     if not gSndTheEnvironment:isPlaying() then
       gSndTheEnvironment:play()
     end
@@ -479,6 +486,9 @@ function tryToAdvanceOnePhase()
     shouldAdvance = true
   elseif gCurrPhase >= 3 and gTrashCleanedCount >= gTrashNeededToLevelUp then
     gNumAutobombsPerRound = gNumAutobombsPerRound + 1
+    if gNumAutobombsPerRound > MAX_NUM_AUTOBOMBS then
+      gNumAutobombsPerRound = MAX_NUM_AUTOBOMBS
+    end
     increaseGridSize(1)
     shouldAdvance = true
   end
@@ -486,6 +496,12 @@ function tryToAdvanceOnePhase()
   if shouldAdvance then
     gTrashNeededToLevelUp = gTrashNeededToLevelUp * 2
     gCurrPhase = gCurrPhase + 1
+
+    -- make it bit harder
+    gAdjacentSpreadFactorMax = gAdjacentSpreadFactorMax * 2
+    gNewSpreadFactorMax = gNewSpreadFactorMax * 2
+    gDurOfEachDifficultyLvl = gDurOfEachDifficultyLvl * 0.8
+
     gSndLevelUp:play()
   end
 end
