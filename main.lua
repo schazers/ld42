@@ -27,7 +27,7 @@ local gBombToCollectSpawnProbability = 0.05 -- probability of a bomb spawning ad
 
 local gElapsedTimeThisLevel = 0
 local gTimeSinceLastDifficultyIncrease = 0
-local gDurOfEachDifficultyLvl = .4 -- interval after which it gets a little harder
+local gDurOfEachDifficultyLvl = 3 -- interval after which it gets a little harder
 local gTimesDifficultyIncreased = 0
 
 local gTimeSinceLastTrashNewClusterSpawn = 0
@@ -202,6 +202,11 @@ function updateGame(dt)
 end
 
 function tryToMarkCollision(bk, ck)
+
+  if gStuff[ck].hit == true then
+    return
+  end
+
   bombHasExploded = (gLitBombs[bk].time_until_explode <= 0 and gLitBombs[bk].time_since_exploded > 0)
 
   if not bombHasExploded then
@@ -217,6 +222,7 @@ function tryToMarkCollision(bk, ck)
     if G:is_valid(x_to_check, bomb_y) then
       if x_to_check == stuff_x and bomb_y == stuff_y then
         gStuff[ck].hit = true
+        gStuffCleanedCount = gStuffCleanedCount + 1
         markNeighborsAsHitRecursively(gStuff[ck], 0)
         return
       end
@@ -227,6 +233,7 @@ function tryToMarkCollision(bk, ck)
     if G:is_valid(bomb_x, y_to_check) then
       if bomb_x == stuff_x and y_to_check == stuff_y then
         gStuff[ck].hit = true
+        gStuffCleanedCount = gStuffCleanedCount + 1
         markNeighborsAsHitRecursively(gStuff[ck], 0)
         return
       end
@@ -246,6 +253,7 @@ function markNeighborsAsHitRecursively(cell, numSoFar)
   for k,v in pairs(manhattan_neighbors) do
     if v.t == "X" and v.hit == false then
       v.hit = true
+      gStuffCleanedCount = gStuffCleanedCount + 1
       markNeighborsAsHitRecursively(v, numSoFar + 1)
     end
     --todo: consider recursing only on trash
