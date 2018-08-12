@@ -799,6 +799,11 @@ function checkGameOver()
 end
 
 function love.mousepressed(x, y, button)
+  -- disallow clicks out of bounds
+  if x > gGridSize * gSquareW or y > gGridSize * gSquareW then
+    return
+  end
+
   if not gGameStarted then
     startGame()
     return
