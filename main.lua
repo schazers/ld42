@@ -86,6 +86,10 @@ function love.load()
   gImgBombLit3 = love.graphics.newImage("bomb_lit_3.png")
   gImgBombLit2 = love.graphics.newImage("bomb_lit_2.png")
   gImgBombLit1 = love.graphics.newImage("bomb_lit_1.png")
+  gImgTrashExplode1 = love.graphics.newImage("trash_explode_1.png")
+  gImgTrashExplode2 = love.graphics.newImage("trash_explode_2.png")
+  gImgTrashExplode3 = love.graphics.newImage("trash_explode_3.png")
+  gImgTrashExplode4 = love.graphics.newImage("trash_explode_4.png")
 
   -- sounds
   gSndCollect = love.audio.newSource("collect.mp3", "static")
@@ -638,11 +642,20 @@ end
 
 function drawTrash(x, y, c)
   local col = deepCopy(gFullColor)
-  if c.hit and c.time_until_vanquished < gDurUntilStuffVanquished then
-    col[4] = col[4] - (col[4] * (1.0 - (c.time_until_vanquished / gDurUntilStuffVanquished)))
-  end
   love.graphics.setColor(col)
-  love.graphics.draw(gImgTrash, x * gSquareW, y * gSquareW)
+  if c.hit then
+    if c.time_until_vanquished > (3/4) * gDurUntilStuffVanquished then
+      love.graphics.draw(gImgTrashExplode1, x * gSquareW, y * gSquareW)
+    elseif c.time_until_vanquished > (2/4) * gDurUntilStuffVanquished then
+      love.graphics.draw(gImgTrashExplode2, x * gSquareW, y * gSquareW)
+    elseif c.time_until_vanquished > (1/4) * gDurUntilStuffVanquished then
+      love.graphics.draw(gImgTrashExplode3, x * gSquareW, y * gSquareW)
+    elseif c.time_until_vanquished > gDurUntilStuffVanquished then
+      love.graphics.draw(gImgTrashExplode4, x * gSquareW, y * gSquareW)
+    end
+  else
+    love.graphics.draw(gImgTrash, x * gSquareW, y * gSquareW)
+  end
 end
 
 function drawBg()
