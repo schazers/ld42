@@ -671,10 +671,9 @@ function drawHUD()
                           gSquareW / 2) -- height
   -- Text
   love.graphics.setColor(1.0, 1.0, 1.0, 1.0)
-  love.graphics.print("Trash cleaned: "..gTrashCleanedCount, gGridSize * gSquareW + 20, 2 * (gSquareW / 2) - 5)
-  gNumAutobombsPerRound
+  love.graphics.print("Trash: "..gTrashCleanedCount, gGridSize * gSquareW + 20, (gSquareW / 2) - 5)
   if gNumAutobombsPerRound > 0 then
-    love.graphics.print(gNumAutobombsPerRound, gGridSize * gSquareW + 20, gSquareW / 2 - 5)
+    love.graphics.print("Autobombs: "..gNumAutobombsPerRound, gGridSize * gSquareW + 20, 2 * (gSquareW / 2) - 5)
   end
 end
 
