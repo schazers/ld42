@@ -34,7 +34,6 @@ local gMousehoverCellY = 0
 
 local gBombToCollectSpawnProbability = 0.05 -- probability of a bomb spawning adjacent rather than trash
 
-local gElapsedTimeThisLevel = 0
 local gTimeSinceLastDifficultyIncrease = 0
 local gDurOfEachDifficultyLvl = 1 -- interval after which it gets a little harder
 local gTimesDifficultyIncreased = 0
@@ -43,6 +42,9 @@ local gTimeSinceLastTrashNewClusterSpawn = 0
 local gTimeSinceLastAdjacentSpawn = 0
 
 local gTrashCleanedCount = 0
+
+local gTotalElapsedTime = 0
+local gElapsedTimeCurrGame = 0
 
 -- Use a square grid of tables, each table has a type "t".
 -- Each type has unique table data associated with it
@@ -62,14 +64,49 @@ INITIAL_ADJACENT_SPREAD_FACTOR = 0.5
 ADJACENT_SPREAD_FACTOR_MAX = 10.0
 NEW_SPREAD_FACTOR_MAX = 0.5
 
+function love.load()
+  math.randomseed(os.time())
+
+  -- images
+  gImgTitleScreen1 = love.graphics.newImage("title_screen_1.png")
+  gImgTitleScreen2 = love.graphics.newImage("title_screen_2.png")
+  gImgCurrTitleScreen = gImgTitleScreen1
+  gImgFloor = love.graphics.newImage("sand.png")
+  gImgTrash = love.graphics.newImage("trash.png")
+  gImgBombToCollect = love.graphics.newImage("bomb_to_collect.png")
+  gImgBombLit3 = love.graphics.newImage("bomb_lit_3.png")
+  gImgBombLit2 = love.graphics.newImage("bomb_lit_2.png")
+  gImgBombLit1 = love.graphics.newImage("bomb_lit_1.png")
+
+  -- sounds
+  gSndCollect = love.audio.newSource("collect.mp3", "static")
+  gSndExplode = love.audio.newSource("explode.mp3", "static")
+  gSndLayBomb = love.audio.newSource("lay_bomb.mp3", "static")
+  gSndTrashSpawn = love.audio.newSource("trash_spawn.mp3", "static")
+  gSndTrashSimulator = love.audio.newSource("trash_simulator.mp3", "static")
+  gSndTheEnvironment = love.audio.newSource("the_environment.mp3", "static")
+  gSndLevelUp = love.audio.newSource("level_up.mp3", "static")
+  gSndPlaying = love.audio.newSource("playing.mp3", "stream")
+
+  gSndTrashSpawn:setVolume(0.03)
+  gSndLayBomb:setVolume(0.5)
+  gSndCollect:setVolume(0.7)
+  gSndPlaying:setLooping(true)
+
+  gSndTrashSimulator:play()
+end
+
 function startGame()
   gGridSize = 16
   gCurrPhase = 1
+  gCurrBombSpread = 3
+  gNumAutobombsPerRound = 0
   gTrashNeededToLevelUp = 256
   gNewTrashSpreadFactor = INITIAL_NEW_SPREAD_FACTOR
   gAdjacentTrashSpreadFactor = INITIAL_ADJACENT_SPREAD_FACTOR
   gTrashCleanedCount = 0
   gCurrBombSupply = 0
+  gElapsedTimeCurrGame = 0
 
   -- set up grid data structure
   fillGridWithEmptySpots()
@@ -109,6 +146,13 @@ function startGame()
       spawnTrash(i, gGridSize - 1)
     end
   end
+
+  -- sound
+  if gSndTrashSimulator:isPlaying() then
+    gSndTrashSimulator:stop()
+  end
+
+  gGameStarted = true
 end
 
 -- gets all spaces neighboring spaces where there is currently trash
@@ -252,26 +296,21 @@ function handleSpawning(dt)
   end
 end
 
-function love.load()
-  math.randomseed(os.time())
-  gImgFloor = love.graphics.newImage("sand.png")
-  gImgTrash = love.graphics.newImage("trash.png")
-  gImgBombToCollect = love.graphics.newImage("bomb_to_collect.png")
-  gImgBombLit3 = love.graphics.newImage("bomb_lit_3.png")
-  gImgBombLit2 = love.graphics.newImage("bomb_lit_2.png")
-  gImgBombLit1 = love.graphics.newImage("bomb_lit_1.png")
-end
-
 function love.update(dt)
   if not gGameStarted then
     updateTitleScreen(dt)
   else
     updateGame(dt)
   end
+  gTotalElapsedTime = gTotalElapsedTime + dt
 end
 
 function updateTitleScreen(dt)
-  -- todo
+  if (math.floor(gTotalElapsedTime * 2) % 2 == 0) then
+    gImgCurrTitleScreen = gImgTitleScreen1
+  else
+    gImgCurrTitleScreen = gImgTitleScreen2
+  end
 end
 
 function clearTable(t)
@@ -287,6 +326,12 @@ function updateGame(dt)
   -- todo: these tables is dumb extra state, should ideally read as a computed property
   clearTable(gLitBombs)
   clearTable(gStuff)
+
+  if gElapsedTimeCurrGame > 40 and gElapsedTimeCurrGame < 40.2 then
+    if not gSndTheEnvironment:isPlaying() then
+      gSndTheEnvironment:play()
+    end
+  end
 
   -- update every spot in the grid
   for x = 1, G.size_x do
@@ -316,7 +361,7 @@ function updateGame(dt)
 
   removeAnyOrphanTrash()
 
-  gElapsedTimeThisLevel = gElapsedTimeThisLevel + dt
+  gElapsedTimeCurrGame = gElapsedTimeCurrGame + dt
 end
 
 -- removes all trash which does not have any
@@ -329,7 +374,7 @@ function removeAnyOrphanTrash()
         visited = {}
         if not hasPathToPerimeter(cell, visited) then
           -- 1000 is large for recurse as long as needed
-          destroyTrashAndItsPile(cell, 1000)
+          destroyTrashAndItsPile(cell, 1000, true)
         end
       end
     end
@@ -388,7 +433,7 @@ function tryToMarkCollision(bk, ck)
   for x_to_check = (bomb_x - ((gCurrBombSpread - 1) / 2)), (bomb_x + ((gCurrBombSpread - 1) / 2)) do
     if G:is_valid(x_to_check, bomb_y) then
       if x_to_check == stuff_x and bomb_y == stuff_y then
-        destroyTrashAndItsPile(gStuff[ck], gChainReactionFactor)
+        destroyTrashAndItsPile(gStuff[ck], gChainReactionFactor, false)
         return
       end
     end
@@ -397,16 +442,22 @@ function tryToMarkCollision(bk, ck)
   for y_to_check = (bomb_y - ((gCurrBombSpread - 1) / 2)), (bomb_y + ((gCurrBombSpread - 1) / 2)) do
     if G:is_valid(bomb_x, y_to_check) then
       if bomb_x == stuff_x and y_to_check == stuff_y then
-        destroyTrashAndItsPile(gStuff[ck], gChainReactionFactor)
+        destroyTrashAndItsPile(gStuff[ck], gChainReactionFactor, false)
         return
       end
     end
   end
 end
 
-function destroyTrashAndItsPile(startingTrash, chainReactionFactor)
+function destroyTrashAndItsPile(startingTrash, chainReactionFactor, wasOrphanTrash)
   destroySingleTrash(startingTrash)
   destroyManhattanNeighboringStuffRecursively(startingTrash, 0, chainReactionFactor)
+  if not wasOrphanTrash then
+    if gSndExplode:isPlaying() then
+      gSndExplode:stop()
+    end
+    gSndExplode:play()
+  end
 end
 
 function destroySingleTrash(trash)
@@ -417,23 +468,26 @@ end
 
 function tryToAdvanceOnePhase()
   -- todo: each phase, increase the rate of trash generation by a bit?
+  local shouldAdvance = false
   if gCurrPhase == 1 and gTrashCleanedCount >= gTrashNeededToLevelUp then
     gNumAutobombsPerRound = 1
     increaseGridSize(1)
-    gTrashNeededToLevelUp = gTrashNeededToLevelUp * 2
-    gCurrPhase = gCurrPhase + 1
+    shouldAdvance = true
   elseif gCurrPhase == 2 and gTrashCleanedCount >= gTrashNeededToLevelUp then
-    gNumAutobombsPerRound = gNumAutobombsPerRound * 2
+    gNumAutobombsPerRound = gNumAutobombsPerRound + 1
     increaseGridSize(1)
-    gTrashNeededToLevelUp = gTrashNeededToLevelUp * 2
-    gCurrPhase = gCurrPhase + 1
+    shouldAdvance = true
   elseif gCurrPhase >= 3 and gTrashCleanedCount >= gTrashNeededToLevelUp then
-    gNumAutobombsPerRound = gNumAutobombsPerRound * 2
+    gNumAutobombsPerRound = gNumAutobombsPerRound + 1
     increaseGridSize(1)
-    gTrashNeededToLevelUp = gTrashNeededToLevelUp * 2
-    gCurrPhase = gCurrPhase + 1
+    shouldAdvance = true
   end
 
+  if shouldAdvance then
+    gTrashNeededToLevelUp = gTrashNeededToLevelUp * 2
+    gCurrPhase = gCurrPhase + 1
+    gSndLevelUp:play()
+  end
 end
 
 -- todo: do this later
@@ -636,8 +690,8 @@ function drawCursor()
                                  gSquareW / 2)
     love.graphics.setColor(1.0, 1.0, 1.0, 1.0)
     love.graphics.print(gCurrBombSupply,
-                       (gMousehoverCellX-1) * gSquareW + (0.5 * gSquareW),
-                       (gMousehoverCellY-1) * gSquareW + (0.5 * gSquareW))
+                       (gMousehoverCellX-1) * gSquareW + (0.5 * gSquareW)-5,
+                       (gMousehoverCellY-1) * gSquareW + (0.5 * gSquareW)-25)
   elseif cell.t == "BC" then
     love.graphics.setColor(0.4, 1.0, 0.4, 1.0)
     love.graphics.circle("line", (gMousehoverCellX-1) * gSquareW + (0.5 * gSquareW),
@@ -651,7 +705,7 @@ end
 
 function love.draw()
   if not gGameStarted then
-    love.graphics.print(instructions, 50, 50)
+    love.graphics.draw(gImgCurrTitleScreen, 0, 0)
   else
     drawBg()
     drawAllTrash()
@@ -736,6 +790,10 @@ function checkGameOver()
   if allSpotsTaken then
     -- todo: write out high score
     G:reset_all()
+    if gSndPlaying:isPlaying() then
+      gSndPlaying:stop()
+    end
+    gSndTrashSimulator:play()
     gGameStarted = false
   end
 end
@@ -743,7 +801,6 @@ end
 function love.mousepressed(x, y, button)
   if not gGameStarted then
     startGame()
-    gGameStarted = true
     return
   end
 
@@ -778,6 +835,10 @@ function tryToCollectBomb(x, y)
   if cell.t == "BC" then
     gCurrBombSupply = gCurrBombSupply + 1
     cell.t = "-"
+    if gSndCollect:isPlaying() then
+      gSndCollect:stop()
+    end
+    gSndCollect:play()
     return true
   else
     return false
@@ -790,11 +851,19 @@ function tryToLayBomb(x, y)
   if isSpaceEmpty and playerHasBombsLeft then
     G:set_cell(x, y, { t = "B", xpos = x, ypos = y, exploded = false, time_until_explode = gBombDurUntilExplode, time_since_exploded = gBombExplosionDur })
     gCurrBombSupply = gCurrBombSupply - 1
+    if gSndLayBomb:isPlaying() then
+      gSndLayBomb:stop()
+    end
+    gSndLayBomb:play()
   end
 end
 
 function spawnTrash(x, y)
   G:set_cell(x, y, { t = "X", xpos = x, ypos = y, hit = false, time_until_vanquished = gDurUntilStuffVanquished })
+  if gSndTrashSpawn:isPlaying() then
+    gSndTrashSpawn:stop()
+  end
+  gSndTrashSpawn:play()
   checkGameOver()
 end
 
@@ -804,6 +873,10 @@ end
 
 function spawnLitBomb(x, y)
   G:set_cell(x, y, { t = "B", xpos = x, ypos = y, exploded = false, time_until_explode = gBombDurUntilExplode, time_since_exploded = gBombExplosionDur })
+  if gSndLayBomb:isPlaying() then
+    gSndLayBomb:stop()
+  end
+  gSndLayBomb:play()
 end
 
 function getCellAtPoint(mouse_x, mouse_y)
