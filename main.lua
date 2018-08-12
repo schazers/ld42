@@ -76,8 +76,7 @@ function love.load()
   HiScore:load()
 
   -- font
-  local theFont = love.graphics.newFont("8bitwonder.ttf", 18)
-  love.graphics.setFont(theFont)
+  gTheFont = love.graphics.newFont("8bitwonder.ttf", 18)
 
   -- images
   gImgTitleScreen1 = love.graphics.newImage("title_screen_1.png")
@@ -754,6 +753,8 @@ function drawCursor()
 end
 
 function love.draw()
+  -- call setFont only inside .draw or it will set Ghost's font
+  love.graphics.setFont(gTheFont)
   if not gGameStarted then
     love.graphics.draw(gImgCurrTitleScreen, 0, 0)
     love.graphics.setColor(167.0/255.0, 131.0/255.0, 95.0/255.0, 1.0)
