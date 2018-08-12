@@ -1,4 +1,5 @@
 require "grid"
+HiScore = require 'hiscore'
 
 -- GFX Globals
 local instructions = "Click to collect and lay bombs. Rid this earth of its filth."
@@ -72,6 +73,8 @@ gNewSpreadFactorMax = 0.5
 function love.load()
   math.randomseed(os.time())
 
+  HiScore:load()
+
   -- font
   local theFont = love.graphics.newFont("8bitwonder.ttf", 18)
   love.graphics.setFont(theFont)
@@ -103,13 +106,9 @@ function love.load()
   gSndTrashSimulator = love.audio.newSource("trash_simulator.mp3", "static")
   gSndTheEnvironment = love.audio.newSource("the_environment.mp3", "static")
   gSndLevelUp = love.audio.newSource("level_up.mp3", "static")
-  gSndPlaying = love.audio.newSource("playing.mp3", "stream")
-
   gSndTrashSpawn:setVolume(0.03)
   gSndLayBomb:setVolume(0.5)
   gSndCollect:setVolume(0.7)
-  gSndPlaying:setLooping(true)
-
   gSndTrashSimulator:play()
 end
 
@@ -757,6 +756,8 @@ end
 function love.draw()
   if not gGameStarted then
     love.graphics.draw(gImgCurrTitleScreen, 0, 0)
+    love.graphics.setColor(167.0/255.0, 131.0/255.0, 95.0/255.0, 1.0)
+    love.graphics.print("High Score  "..HiScore:get(), 10, (gGridSize * gSquareW) + 10)
   else
     drawBg()
     drawAllTrash()
@@ -773,12 +774,12 @@ function drawHUD()
   love.graphics.rectangle("fill",
                           0, (gGridSize * gSquareW), -- x, y
                           (trashSoFarThisLevel() / trashGoalNeededWithinCurrLevel()) * (gGridSize * gSquareW), -- width
-                          gSquareW / 2) -- height
+                          gSquareW / 3) -- height
   -- Text
-  love.graphics.setColor(1.0, 1.0, 1.0, 1.0)
-  love.graphics.print("Trash     "..gTrashCleanedCount, gGridSize * gSquareW + 20, (gSquareW / 2) - 5)
+  love.graphics.setColor(167.0/255.0, 131.0/255.0, 95.0/255.0, 1.0)
+  love.graphics.print("Trash      "..gTrashCleanedCount, 10, (gGridSize * gSquareW) + (gSquareW / 3) + 10)
   if gNumAutobombsPerRound > 0 then
-    love.graphics.print("Autobombs  "..gNumAutobombsPerRound, gGridSize * gSquareW + 20, 2 * (gSquareW / 2) - 5)
+    love.graphics.print("Autobombs  "..gNumAutobombsPerRound, 10, (gGridSize * gSquareW) + (gSquareW / 3) + 10 + 20)
   end
 end
 
@@ -839,11 +840,8 @@ function checkGameOver()
   end
 
   if allSpotsTaken then
-    -- todo: write out high score
+    HiScore:maybeSave(gTrashCleanedCount)
     G:reset_all()
-    if gSndPlaying:isPlaying() then
-      gSndPlaying:stop()
-    end
     gSndTrashSimulator:play()
     gGameStarted = false
   end
