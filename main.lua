@@ -1,9 +1,9 @@
 require "grid"
 
 -- GFX Globals
-local instructions = "Click to clean up. Keys to select ability. Right click to use it."
+local instructions = "Click to collect and lay bombs."
 local gSquareW = 32
-local gCellTrashColor = { 0.5, 0.5, 0.5, 1.0 }
+local gFullColor = { 1.0, 1.0, 1.0, 1.0 }
 local gCellBombColorLaid = { 0.8, 0.3, 0.3, 1.0 }
 local gCellBombColorExploding = { 0.8, 0.4, 0.15, 1.0 }
 
@@ -11,26 +11,29 @@ local gCellBombColorExploding = { 0.8, 0.4, 0.15, 1.0 }
 local gGridSize = 16
 local gGameStarted = false
 local gGameOver = false
-local gBombDurUntilExplode = 0.4
+local gBombDurUntilExplode = 0.7
 local gBombExplosionDur = 0.6
-local gDurUntilTrashVanquished = gBombExplosionDur
+local gDurUntilStuffVanquished = gBombExplosionDur
 
 -- num squares bomb will explode on each axis,
 -- including the square on which it is laid
-local gCurrBombSpread = gGridSize * 2 + 1 -- odd numbers only
-local gCurrBombSupply = 1
+local gCurrBombSpread = 3--gGridSize * 2 + 1 -- odd numbers only
+local gCurrBombSupply = 0
 
 local gMousehoverCellX = 0
 local gMousehoverCellY = 0
 
-local gShouldAdvanceLevel = false
+local gBombToCollectSpawnProbability = 0.05 -- probability of a bomb spawning adjacent rather than trash
+
 local gElapsedTimeThisLevel = 0
 local gTimeSinceLastDifficultyIncrease = 0
-local gDurOfEachDifficultyLvl = 3 -- interval after which it gets a little harder
+local gDurOfEachDifficultyLvl = .4 -- interval after which it gets a little harder
 local gTimesDifficultyIncreased = 0
 
 local gTimeSinceLastTrashNewClusterSpawn = 0
-local gTimeSinceLastTrashAdjacentSpawn = 0
+local gTimeSinceLastAdjacentSpawn = 0
+
+local gStuffCleanedCount = 0
 
 -- Use a square grid of tables, each table has a type "t".
 -- Each type has unique table data associated with it
@@ -40,8 +43,8 @@ local gTimeSinceLastTrashAdjacentSpawn = 0
 -- "B" is a bomb
 G = grid.Grid(gGridSize, gGridSize, { t = "-" })
 
-gBombs = {}
-gTrash = {}
+gLitBombs = {}
+gStuff = {} -- a stuff item is either a Trash or BombToCollect
 
 gNewSpreadFactor = 0
 gAdjacentSpreadFactor = 0
@@ -50,21 +53,19 @@ function startGame()
   gNewSpreadFactor = 0.001
   gAdjacentSpreadFactor = 0.02
 
-  -- todo: lay each new level properly
-  spawnTrash(8, 8)
+  -- one bomb in the center
+  spawnBombToCollect(gGridSize / 2, gGridSize / 2)
 
-  gCurrBombSupply = 1
-  gShouldAdvanceLevel = false
+  gCurrBombSupply = 0
 end
 
-function handleTrashSpawning(dt)
+function handleSpawning(dt)
   -- get all spaces neighboring spaces where there is currently trash
   local adjacentEmptySpaces = {}
   for x = 1, G.size_x do
     for y = 1, G.size_y do
       local cell_data = G:get_cell(x, y)
       if cell_data.t == "X" then
-
         for xn = -1, 1 do
           for yn = -1, 1 do
             local cand_x = x + xn
@@ -73,8 +74,8 @@ function handleTrashSpawning(dt)
               -- ignore original block!
             elseif G:is_valid(cand_x, cand_y) then
               local cell = G:get_cell(cand_x, cand_y)
-              if cell.t == "-" then
-                  adjacentEmptySpaces[#adjacentEmptySpaces + 1] = { xpos = cand_x, ypos = cand_y }
+              if cell.t == "-"  or cell_data.t == "BC" then
+                adjacentEmptySpaces[#adjacentEmptySpaces + 1] = { xpos = cand_x, ypos = cand_y }
               end
             end
           end
@@ -83,16 +84,22 @@ function handleTrashSpawning(dt)
     end
   end
 
-  if math.random() < (gAdjacentSpreadFactor * gTimeSinceLastTrashAdjacentSpawn) then
+  if math.random() < (gAdjacentSpreadFactor * gTimeSinceLastAdjacentSpawn) then
     local spawnSpot = adjacentEmptySpaces[math.random(#adjacentEmptySpaces)]
     if spawnSpot ~= nil then
-      spawnTrash(spawnSpot.xpos, spawnSpot.ypos)
-      gTimeSinceLastTrashAdjacentSpawn = 0
+
+      if math.random() < gBombToCollectSpawnProbability then
+        spawnBombToCollect(spawnSpot.xpos, spawnSpot.ypos)
+      else
+        spawnTrash(spawnSpot.xpos, spawnSpot.ypos)
+      end
+
+      gTimeSinceLastAdjacentSpawn = 0
     else
-      gTimeSinceLastTrashAdjacentSpawn = gTimeSinceLastTrashAdjacentSpawn + dt
+      gTimeSinceLastAdjacentSpawn = gTimeSinceLastAdjacentSpawn + dt
     end
   else
-    gTimeSinceLastTrashAdjacentSpawn = gTimeSinceLastTrashAdjacentSpawn + dt
+    gTimeSinceLastAdjacentSpawn = gTimeSinceLastAdjacentSpawn + dt
   end
 
   -- just generate all spaces them every frame right now
@@ -101,13 +108,13 @@ function handleTrashSpawning(dt)
   for x = 1, G.size_x do
     for y = 1, G.size_y do
       local cell_data = G:get_cell(x, y)
-      if cell_data.t == "-" then
+      if cell_data.t == "-" or cell_data.t == "BC" then
         allEmptySpaces[#allEmptySpaces + 1] = { xpos = x, ypos = y }
       end
     end
   end
 
-  -- todo: spawn random new spots rarely, spawn adjacent spots adjacent to existing things more commonly
+  -- rarely, spawn random new trash spots
   if math.random() < (gNewSpreadFactor * gTimeSinceLastTrashNewClusterSpawn) then
     local spawnSpot = allEmptySpaces[math.random(#allEmptySpaces)]
     if spawnSpot ~= nil then
@@ -129,13 +136,14 @@ function handleTrashSpawning(dt)
   else
     gTimeSinceLastDifficultyIncrease = gTimeSinceLastDifficultyIncrease + dt
   end
-
 end
 
 function love.load()
   math.randomseed(os.time())
   gImgFloor = love.graphics.newImage("sand.png")
   gImgTrash = love.graphics.newImage("trash.png")
+  gImgBombToCollect = love.graphics.newImage("bomb_to_collect.png")
+  gImgBombLit = love.graphics.newImage("bomb_lit.png")
 end
 
 function love.update(dt)
@@ -157,12 +165,12 @@ function clearTable(t)
 end
 
 function updateGame(dt)
-  handleTrashSpawning(dt)
+  handleSpawning(dt)
 
   -- clear arrays to prepare for collision detection
   -- todo: these tables is dumb extra state, should ideally read as a computed property
-  clearTable(gBombs)
-  clearTable(gTrash)
+  clearTable(gLitBombs)
+  clearTable(gStuff)
 
   -- update every spot in the grid
   for x = 1, G.size_x do
@@ -172,17 +180,20 @@ function updateGame(dt)
         -- nothing on empty spots...
       elseif cell_data.t == "B" then
         updateBomb(cell_data, dt)
-        gBombs[#gBombs + 1] = cell_data
+        gLitBombs[#gLitBombs + 1] = cell_data
       elseif cell_data.t == "X" then
         updateTrash(cell_data, dt)
-        gTrash[#gTrash + 1] = cell_data
+        gStuff[#gStuff + 1] = cell_data
+      elseif cell_data.t == "BC" then
+        updateBombToCollect(cell_data, dt)
+        gStuff[#gStuff + 1] = cell_data
       end
     end
   end
 
   -- collisions
-  for ck,cv in pairs(gTrash) do
-    for bk, bv in pairs(gBombs) do
+  for ck,cv in pairs(gStuff) do
+    for bk, bv in pairs(gLitBombs) do
       tryToMarkCollision(bk, ck)
     end
   end
@@ -191,21 +202,22 @@ function updateGame(dt)
 end
 
 function tryToMarkCollision(bk, ck)
-  bombHasExploded = (gBombs[bk].time_until_explode <= 0 and gBombs[bk].time_since_exploded > 0)
+  bombHasExploded = (gLitBombs[bk].time_until_explode <= 0 and gLitBombs[bk].time_since_exploded > 0)
 
   if not bombHasExploded then
     return
   end
 
-  local bomb_x = gBombs[bk].xpos
-  local bomb_y = gBombs[bk].ypos
-  local trash_x = gTrash[ck].xpos
-  local trash_y = gTrash[ck].ypos
+  local bomb_x = gLitBombs[bk].xpos
+  local bomb_y = gLitBombs[bk].ypos
+  local stuff_x = gStuff[ck].xpos
+  local stuff_y = gStuff[ck].ypos
 
   for x_to_check = (bomb_x - ((gCurrBombSpread - 1) / 2)), (bomb_x + ((gCurrBombSpread - 1) / 2)) do
     if G:is_valid(x_to_check, bomb_y) then
-      if x_to_check == trash_x and bomb_y == trash_y then
-        gTrash[ck].hit = true
+      if x_to_check == stuff_x and bomb_y == stuff_y then
+        gStuff[ck].hit = true
+        markNeighborsAsHitRecursively(gStuff[ck], 0)
         return
       end
     end
@@ -213,12 +225,53 @@ function tryToMarkCollision(bk, ck)
 
   for y_to_check = (bomb_y - ((gCurrBombSpread - 1) / 2)), (bomb_y + ((gCurrBombSpread - 1) / 2)) do
     if G:is_valid(bomb_x, y_to_check) then
-      if bomb_x == trash_x and y_to_check == trash_y then
-        gTrash[ck].hit = true
+      if bomb_x == stuff_x and y_to_check == stuff_y then
+        gStuff[ck].hit = true
+        markNeighborsAsHitRecursively(gStuff[ck], 0)
         return
       end
     end
   end
+end
+
+-- todo: consider doing breadth first, not depth first,
+-- if we want to limit the total blast radius of the bombs
+function markNeighborsAsHitRecursively(cell, numSoFar)
+
+  if numSoFar > 3 then
+    return
+  end
+
+  manhattan_neighbors = getManhattanNeighbors(cell)
+  for k,v in pairs(manhattan_neighbors) do
+    if v.t == "X" and v.hit == false then
+      v.hit = true
+      markNeighborsAsHitRecursively(v, numSoFar + 1)
+    end
+    --todo: consider recursing only on trash
+    if v.t == "BC" and v.hit == false then
+      v.hit = true
+      markNeighborsAsHitRecursively(v, numSoFar + 1)
+    end
+  end
+end
+
+function getManhattanNeighbors(cell)
+  manhattan_neighbors = {}
+
+  candidates = {}
+  candidates[#candidates + 1] = G:get_cell(cell.xpos, cell.ypos - 1)
+  candidates[#candidates + 1] = G:get_cell(cell.xpos - 1, cell.ypos)
+  candidates[#candidates + 1] = G:get_cell(cell.xpos + 1, cell.ypos)
+  candidates[#candidates + 1] = G:get_cell(cell.xpos, cell.ypos + 1)
+
+  for k,v in pairs(candidates) do
+    if G:is_valid(v.xpos, v.ypos) then
+      manhattan_neighbors[#manhattan_neighbors + 1] = v
+    end
+  end
+
+  return manhattan_neighbors
 end
 
 function allSpotsEmpty()
@@ -240,7 +293,6 @@ function updateBomb(b, dt)
     b.time_since_exploded = b.time_since_exploded - dt
     if not b.exploded then
       b.exploded = true
-      gCurrBombSupply = gCurrBombSupply + 1
     end
   else
     b.t = "-"
@@ -256,11 +308,19 @@ function updateTrash(c, dt)
   end
 end
 
+function updateBombToCollect(bc, dt)
+  if bc.hit and (bc.time_until_vanquished > 0) then
+    bc.time_until_vanquished = bc.time_until_vanquished - dt
+  elseif bc.hit and (bc.time_until_vanquished <= 0) then
+    bc.t = "-"
+  end
+end
+
 function drawFloor(x, y, e)
   love.graphics.draw(gImgFloor, x * gSquareW, y * gSquareW)
 end
 
-function drawBomb(x, y, b)
+function drawLitBomb(x, y, b)
   local col = deepCopy(gCellBombColorLaid)
   if b.time_until_explode > (2/3) * gBombDurUntilExplode then
     love.graphics.setColor(col)
@@ -294,9 +354,9 @@ function drawBomb(x, y, b)
 end
 
 function drawTrash(x, y, c)
-  local col = deepCopy(gCellTrashColor)
-  if c.hit and c.time_until_vanquished < gDurUntilTrashVanquished then
-    col[4] = col[4] - (col[4] * (1.0 - (c.time_until_vanquished / gDurUntilTrashVanquished)))
+  local col = deepCopy(gFullColor)
+  if c.hit and c.time_until_vanquished < gDurUntilStuffVanquished then
+    col[4] = col[4] - (col[4] * (1.0 - (c.time_until_vanquished / gDurUntilStuffVanquished)))
   end
   love.graphics.setColor(col)
   love.graphics.draw(gImgTrash, x * gSquareW, y * gSquareW)
@@ -324,12 +384,32 @@ function drawAllTrash()
 end
 
 -- todo: clean this up, don't need for loops
-function drawBombs()
+function drawLitBombs()
   for x = 1, G.size_x do
     for y = 1, G.size_y do
       local cell_data = G:get_cell(x, y)
       if cell_data.t == "B" then
-        drawBomb(x-1, y-1, cell_data)
+        drawLitBomb(x-1, y-1, cell_data)
+      end
+    end
+  end
+end
+
+function drawBombToCollect(x, y, bc)
+  local col = deepCopy(gFullColor)
+  if bc.hit and bc.time_until_vanquished < gDurUntilStuffVanquished then
+    col[4] = col[4] - (col[4] * (1.0 - (bc.time_until_vanquished / gDurUntilStuffVanquished)))
+  end
+  love.graphics.setColor(col)
+  love.graphics.draw(gImgBombToCollect, x * gSquareW, y * gSquareW)
+end
+
+function drawBombsToCollect()
+  for x = 1, G.size_x do
+    for y = 1, G.size_y do
+      local cell_data = G:get_cell(x, y)
+      if cell_data.t == "BC" then
+        drawBombToCollect(x-1, y-1, cell_data)
       end
     end
   end
@@ -346,10 +426,11 @@ function love.draw()
   else
     drawBg()
     drawAllTrash()
-    drawBombs()
+    drawBombsToCollect()
+    drawLitBombs()
     drawCursor()
     love.graphics.print(gCurrBombSupply, gGridSize * gSquareW + 20, gSquareW / 2 - 5)
-    love.graphics.print(math.floor(gCurrBombSpread / 2), gGridSize * gSquareW + 20, 2 * (gSquareW / 2) - 5)
+    love.graphics.print("Trash cleaned: "..gStuffCleanedCount, gGridSize * gSquareW + 20, 2 * (gSquareW / 2) - 5)
   end
 end
 
@@ -376,6 +457,30 @@ function checkRoomFullyCleaned()
   end
 end
 
+function checkGameOver()
+  local allSpotsTrash = true
+
+  -- Fail iff any trash present
+  for x = 1, G.size_x do
+    for y = 1, G.size_y do
+      local cell_data = G:get_cell(x, y)
+      if cell_data.t ~= "X" then
+        allSpotsTrash = false
+        break
+      end
+    end
+    if not allSpotsTrash then
+      break
+    end
+  end
+
+  if allSpotsTrash then
+    -- todo: write out high score
+    G:reset_all()
+    gGameStarted = false
+  end
+end
+
 function love.mousepressed(x, y, button)
   if not gGameStarted then
     startGame()
@@ -391,9 +496,9 @@ function love.mousepressed(x, y, button)
 
   cell_x, cell_y = getCellAtPoint(x, y)
   if button == 1 then
-    tryToPickUpTrash(cell_x, cell_y)
-  elseif button == 2 then
-    tryToLayBomb(cell_x, cell_y)
+    if not tryToCollectBomb(cell_x, cell_y) then
+      tryToLayBomb(cell_x, cell_y)
+    end
   end
 end
 
@@ -413,25 +518,33 @@ function love.keypressed(key, scancode, isrepeat)
   end
 end
 
-function tryToPickUpTrash(x, y)
+function tryToCollectBomb(x, y)
   local cell = G:get_cell(x, y)
-  if cell.t == "X" then
+  if cell.t == "BC" then
+    gCurrBombSupply = gCurrBombSupply + 1
     cell.t = "-"
-    checkRoomFullyCleaned()
+    return true
+  else
+    return false
   end
 end
 
 function tryToLayBomb(x, y)
   isSpaceEmpty = G:get_cell(x, y).t == "-"
   playerHasBombsLeft = gCurrBombSupply > 0
-  if isSpaceEmpty and playerHasBombsLeft and not gShouldAdvanceLevel then
+  if isSpaceEmpty and playerHasBombsLeft then
     G:set_cell(x, y, { t = "B", xpos = x, ypos = y, exploded = false, time_until_explode = gBombDurUntilExplode, time_since_exploded = gBombExplosionDur })
     gCurrBombSupply = gCurrBombSupply - 1
   end
 end
 
 function spawnTrash(x, y)
-  G:set_cell(x, y, { t = "X", xpos = x, ypos = y, hit = false, time_until_vanquished = gDurUntilTrashVanquished })
+  G:set_cell(x, y, { t = "X", xpos = x, ypos = y, hit = false, time_until_vanquished = gDurUntilStuffVanquished })
+  checkGameOver()
+end
+
+function spawnBombToCollect(x, y)
+  G:set_cell(x, y, { t = "BC", xpos = x, ypos = y, hit = false, time_until_vanquished = gDurUntilStuffVanquished })
 end
 
 function getCellAtPoint(mouse_x, mouse_y)
