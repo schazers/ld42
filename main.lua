@@ -4,20 +4,20 @@ require "grid"
 local instructions = "Click to collect and lay bombs."
 local gSquareW = 32
 local gFullColor = { 1.0, 1.0, 1.0, 1.0 }
-local gCellBombColorLaid = { 0.8, 0.3, 0.3, 1.0 }
 local gCellBombColorExploding = { 0.8, 0.4, 0.15, 1.0 }
 
 -- Game Constants
 local gGridSize = 16
 local gGameStarted = false
 local gGameOver = false
-local gBombDurUntilExplode = 0.7
+local gBombDurUntilExplode = 0.4
 local gBombExplosionDur = 0.6
 local gDurUntilStuffVanquished = gBombExplosionDur
 
 -- num squares bomb will explode on each axis,
 -- including the square on which it is laid
-local gCurrBombSpread = 3--gGridSize * 2 + 1 -- odd numbers only
+local gCurrBombSpread = 3 --gGridSize * 2 + 1 -- odd numbers only
+local gChainReactionFactor = 4 -- recursive depth along each neighbor exploded
 local gCurrBombSupply = 0
 
 local gMousehoverCellX = 0
@@ -46,17 +46,21 @@ G = grid.Grid(gGridSize, gGridSize, { t = "-" })
 gLitBombs = {}
 gStuff = {} -- a stuff item is either a Trash or BombToCollect
 
-gNewSpreadFactor = 0
-gAdjacentSpreadFactor = 0
+INITIAL_NEW_SPREAD_FACTOR = 0.001 --0.001
+INITIAL_ADJACENT_SPREAD_FACTOR = 0.02
 
 function startGame()
-  gNewSpreadFactor = 0.001
-  gAdjacentSpreadFactor = 0.02
-
-  -- one bomb in the center
-  spawnBombToCollect(gGridSize / 2, gGridSize / 2)
-
+  gNewTrashSpreadFactor = INITIAL_NEW_SPREAD_FACTOR
+  gAdjacentTrashSpreadFactor = INITIAL_NEW_SPREAD_FACTOR
+  gStuffCleanedCount = 0
   gCurrBombSupply = 0
+
+  -- start with 9 bombs in center
+  for i = 7, 9 do
+    for j = 7, 9 do
+        spawnBombToCollect(i,j)
+    end
+  end
 end
 
 function handleSpawning(dt)
@@ -68,14 +72,16 @@ function handleSpawning(dt)
       if cell_data.t == "X" then
         for xn = -1, 1 do
           for yn = -1, 1 do
-            local cand_x = x + xn
-            local cand_y = y + yn
-            if cand_x == 0 and cand_y == 0 then
-              -- ignore original block!
-            elseif G:is_valid(cand_x, cand_y) then
-              local cell = G:get_cell(cand_x, cand_y)
-              if cell.t == "-"  or cell_data.t == "BC" then
-                adjacentEmptySpaces[#adjacentEmptySpaces + 1] = { xpos = cand_x, ypos = cand_y }
+            if xn == 0 or yn == 0 then -- spread to manhattan spots only
+              local cand_x = x + xn
+              local cand_y = y + yn
+              if cand_x == 0 and cand_y == 0 then
+                -- ignore original block!
+              elseif G:is_valid(cand_x, cand_y) then
+                local cell = G:get_cell(cand_x, cand_y)
+                if cell.t == "-"  or cell_data.t == "BC" then
+                  adjacentEmptySpaces[#adjacentEmptySpaces + 1] = { xpos = cand_x, ypos = cand_y }
+                end
               end
             end
           end
@@ -84,7 +90,7 @@ function handleSpawning(dt)
     end
   end
 
-  if math.random() < (gAdjacentSpreadFactor * gTimeSinceLastAdjacentSpawn) then
+  if math.random() < (gAdjacentTrashSpreadFactor * gTimeSinceLastAdjacentSpawn) then
     local spawnSpot = adjacentEmptySpaces[math.random(#adjacentEmptySpaces)]
     if spawnSpot ~= nil then
 
@@ -115,7 +121,7 @@ function handleSpawning(dt)
   end
 
   -- rarely, spawn random new trash spots
-  if math.random() < (gNewSpreadFactor * gTimeSinceLastTrashNewClusterSpawn) then
+  if math.random() < (gNewTrashSpreadFactor * gTimeSinceLastTrashNewClusterSpawn) then
     local spawnSpot = allEmptySpaces[math.random(#allEmptySpaces)]
     if spawnSpot ~= nil then
       spawnTrash(spawnSpot.xpos, spawnSpot.ypos)
@@ -127,10 +133,11 @@ function handleSpawning(dt)
     gTimeSinceLastTrashNewClusterSpawn = gTimeSinceLastTrashNewClusterSpawn + dt
   end
 
-  -- make it a little harder every so often
+  -- make it a little harder / different over time
+  -- adjacent rises, new spawn slows
   if (gTimeSinceLastDifficultyIncrease > gDurOfEachDifficultyLvl) then
-    gNewSpreadFactor = gNewSpreadFactor + (gNewSpreadFactor / 32)
-    gAdjacentSpreadFactor = gAdjacentSpreadFactor + (gAdjacentSpreadFactor / 8)
+    gNewTrashSpreadFactor = gNewTrashSpreadFactor - (gNewTrashSpreadFactor / 32)
+    gAdjacentTrashSpreadFactor = gAdjacentTrashSpreadFactor + (gAdjacentTrashSpreadFactor / 8)
     gTimeSinceLastDifficultyIncrease = 0
     gTimesDifficultyIncreased = gTimesDifficultyIncreased + 1
   else
@@ -143,7 +150,9 @@ function love.load()
   gImgFloor = love.graphics.newImage("sand.png")
   gImgTrash = love.graphics.newImage("trash.png")
   gImgBombToCollect = love.graphics.newImage("bomb_to_collect.png")
-  gImgBombLit = love.graphics.newImage("bomb_lit.png")
+  gImgBombLit3 = love.graphics.newImage("bomb_lit_3.png")
+  gImgBombLit2 = love.graphics.newImage("bomb_lit_2.png")
+  gImgBombLit1 = love.graphics.newImage("bomb_lit_1.png")
 end
 
 function love.update(dt)
@@ -245,7 +254,7 @@ end
 -- if we want to limit the total blast radius of the bombs
 function markNeighborsAsHitRecursively(cell, numSoFar)
 
-  if numSoFar > 3 then
+  if numSoFar > gChainReactionFactor then
     return
   end
 
@@ -329,18 +338,14 @@ function drawFloor(x, y, e)
 end
 
 function drawLitBomb(x, y, b)
-  local col = deepCopy(gCellBombColorLaid)
+  local col = deepCopy(gFullColor)
+  love.graphics.setColor(col)
   if b.time_until_explode > (2/3) * gBombDurUntilExplode then
-    love.graphics.setColor(col)
-    love.graphics.rectangle("fill", x * gSquareW, y * gSquareW, gSquareW, gSquareW)
+    love.graphics.draw(gImgBombLit3, x * gSquareW, y * gSquareW)
   elseif b.time_until_explode > (1/3) * gBombDurUntilExplode then
-    col[4] = 0.75
-    love.graphics.setColor(col)
-    love.graphics.rectangle("fill", x * gSquareW, y * gSquareW, gSquareW, gSquareW)
+    love.graphics.draw(gImgBombLit2, x * gSquareW, y * gSquareW)
   elseif b.time_until_explode > 0 then
-    col[4] = 0.5
-    love.graphics.setColor(col)
-    love.graphics.rectangle("fill", x * gSquareW, y * gSquareW, gSquareW, gSquareW)
+    love.graphics.draw(gImgBombLit1, x * gSquareW, y * gSquareW)
   elseif b.time_since_exploded > 0 then
     col = deepCopy(gCellBombColorExploding)
     col[4] = col[4] - (col[4] * (1.0 - (b.time_since_exploded / gBombExplosionDur)))
