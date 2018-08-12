@@ -13,7 +13,7 @@ local gGridSize = 16
 local gGameStarted = false
 local gGameOver = false
 local gBombDurUntilExplode = 0.4
-local gBombExplosionDur = 0.5
+local gBombExplosionDur = 0.32
 local gDurUntilStuffVanquished = gBombExplosionDur
 
 -- Phases + Upgrades
@@ -90,6 +90,10 @@ function love.load()
   gImgTrashExplode2 = love.graphics.newImage("trash_explode_2.png")
   gImgTrashExplode3 = love.graphics.newImage("trash_explode_3.png")
   gImgTrashExplode4 = love.graphics.newImage("trash_explode_4.png")
+  gImgBombExplode1 = love.graphics.newImage("bomb_explode_1.png")
+  gImgBombExplode2 = love.graphics.newImage("bomb_explode_2.png")
+  gImgBombExplode3 = love.graphics.newImage("bomb_explode_3.png")
+  gImgBombExplode4 = love.graphics.newImage("bomb_explode_4.png")
 
   -- sounds
   gSndCollect = love.audio.newSource("collect.mp3", "static")
@@ -357,7 +361,7 @@ function updateGame(dt)
       if cell_data.t == "-" then
         -- nothing on empty spots...
       elseif cell_data.t == "B" then
-        updateBomb(cell_data, dt)
+        updateLitBomb(cell_data, dt)
         gLitBombs[#gLitBombs + 1] = cell_data
       elseif cell_data.t == "X" then
         updateTrash(cell_data, dt)
@@ -469,11 +473,8 @@ end
 function destroyTrashAndItsPile(startingTrash, chainReactionFactor, wasOrphanTrash)
   destroySingleTrash(startingTrash)
   destroyManhattanNeighboringStuffRecursively(startingTrash, 0, chainReactionFactor)
-  if not wasOrphanTrash then
-    if gSndExplode:isPlaying() then
-      gSndExplode:stop()
-    end
-    gSndExplode:play()
+  if wasOrphanTrash then
+    -- todo: play a sound?
   end
 end
 
@@ -577,13 +578,17 @@ function allSpotsEmpty()
   return true
 end
 
-function updateBomb(b, dt)
+function updateLitBomb(b, dt)
   if b.time_until_explode > 0 then
     b.time_until_explode = b.time_until_explode - dt
   elseif b.time_since_exploded > 0 then
     b.time_since_exploded = b.time_since_exploded - dt
     if not b.exploded then
       b.exploded = true
+      if gSndExplode:isPlaying() then
+        gSndExplode:stop()
+      end
+      gSndExplode:play()
     end
   else
     b.t = "-"
@@ -621,9 +626,18 @@ function drawLitBomb(x, y, b)
   elseif b.time_until_explode > 0 then
     love.graphics.draw(gImgBombLit1, x * gSquareW, y * gSquareW)
   elseif b.time_since_exploded > 0 then
-    col = deepCopy(gCellBombColorExploding)
-    col[4] = col[4] - (col[4] * (1.0 - (b.time_since_exploded / gBombExplosionDur)))
-    love.graphics.setColor(col)
+    love.graphics.setColor(gFullColor)
+    if b.time_since_exploded > (3/4) * gBombExplosionDur then
+      love.graphics.draw(gImgBombExplode1, x * gSquareW, y * gSquareW)
+    elseif b.time_since_exploded > (2/4) * gBombExplosionDur then
+      love.graphics.draw(gImgBombExplode2, x * gSquareW, y * gSquareW)
+    elseif b.time_since_exploded > (1/4) * gBombExplosionDur then
+      love.graphics.draw(gImgBombExplode3, x * gSquareW, y * gSquareW)
+    elseif b.time_since_exploded > gBombExplosionDur then
+      love.graphics.draw(gImgBombExplode4, x * gSquareW, y * gSquareW)
+    end
+    -- unused
+    --[[
     -- draw spread
     for x_candidate = (x - ((gCurrBombSpread - 1) / 2)), (x + ((gCurrBombSpread - 1) / 2)) do
       if G:is_valid(x_candidate + 1, y + 1) then
@@ -637,6 +651,7 @@ function drawLitBomb(x, y, b)
         love.graphics.rectangle("fill", x * gSquareW, y_candidate * gSquareW, gSquareW, gSquareW)
       end
     end
+    ]]--
   end
 end
 
