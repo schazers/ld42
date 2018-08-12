@@ -1,18 +1,27 @@
 require "grid"
 
 -- GFX Globals
-local instructions = "Click to collect and lay bombs."
+local instructions = "Click to collect and lay bombs. Rid this earth of its filth."
 local gSquareW = 32
 local gFullColor = { 1.0, 1.0, 1.0, 1.0 }
 local gCellBombColorExploding = { 0.8, 0.4, 0.15, 1.0 }
 
+--------------------
 -- Game Constants
+--------------------
 local gGridSize = 16
 local gGameStarted = false
 local gGameOver = false
 local gBombDurUntilExplode = 0.4
-local gBombExplosionDur = 0.6
+local gBombExplosionDur = 0.5
 local gDurUntilStuffVanquished = gBombExplosionDur
+
+-- Phases + Upgrades
+local gCurrPhase = 1
+local gTrashNeededToLevelUp = 256
+local gNumAutobombsPerRound = 0
+local gDurBetweenAutobombRounds = 3 -- seconds
+local gTimeSinceLastRoundOfAutobombs = 0 -- seconds
 
 -- num squares bomb will explode on each axis,
 -- including the square on which it is laid
@@ -27,13 +36,13 @@ local gBombToCollectSpawnProbability = 0.05 -- probability of a bomb spawning ad
 
 local gElapsedTimeThisLevel = 0
 local gTimeSinceLastDifficultyIncrease = 0
-local gDurOfEachDifficultyLvl = 3 -- interval after which it gets a little harder
+local gDurOfEachDifficultyLvl = 1 -- interval after which it gets a little harder
 local gTimesDifficultyIncreased = 0
 
 local gTimeSinceLastTrashNewClusterSpawn = 0
 local gTimeSinceLastAdjacentSpawn = 0
 
-local gStuffCleanedCount = 0
+local gTrashCleanedCount = 0
 
 -- Use a square grid of tables, each table has a type "t".
 -- Each type has unique table data associated with it
@@ -46,30 +55,69 @@ G = grid.Grid(gGridSize, gGridSize, { t = "-" })
 gLitBombs = {}
 gStuff = {} -- a stuff item is either a Trash or BombToCollect
 
-INITIAL_NEW_SPREAD_FACTOR = 0.001 --0.001
-INITIAL_ADJACENT_SPREAD_FACTOR = 0.02
+INITIAL_NEW_SPREAD_FACTOR = 0.02
+INITIAL_ADJACENT_SPREAD_FACTOR = 0.5
+
+-- todo: set these just right
+ADJACENT_SPREAD_FACTOR_MAX = 10.0
+NEW_SPREAD_FACTOR_MAX = 0.5
 
 function startGame()
+  gGridSize = 16
+  gCurrPhase = 1
+  gTrashNeededToLevelUp = 256
   gNewTrashSpreadFactor = INITIAL_NEW_SPREAD_FACTOR
-  gAdjacentTrashSpreadFactor = INITIAL_NEW_SPREAD_FACTOR
-  gStuffCleanedCount = 0
+  gAdjacentTrashSpreadFactor = INITIAL_ADJACENT_SPREAD_FACTOR
+  gTrashCleanedCount = 0
   gCurrBombSupply = 0
+
+  -- set up grid data structure
+  fillGridWithEmptySpots()
 
   -- start with 9 bombs in center
   for i = 7, 9 do
     for j = 7, 9 do
-        spawnBombToCollect(i,j)
+      spawnBombToCollect(i,j)
+    end
+  end
+
+  -- fill the perimeter
+  for i = 1, gGridSize do spawnTrash(1, i) end
+  for i = 1, gGridSize do spawnTrash(i, 1) end
+  for i = 1, gGridSize do spawnTrash(gGridSize, i) end
+  for i = 1, gGridSize do spawnTrash(i, gGridSize) end
+
+  -- spawn some random "tendrils" from 1 in from perimeter
+  local penultimatePerimSpawnChance = 0.4
+  for i = 2, gGridSize - 1 do
+    if math.random() < penultimatePerimSpawnChance then
+      spawnTrash(2, i)
+    end
+  end
+  for i = 2, gGridSize - 1 do
+    if math.random() < penultimatePerimSpawnChance then
+      spawnTrash(i, 2)
+    end
+  end
+  for i = 2, gGridSize - 1 do
+    if math.random() < penultimatePerimSpawnChance then
+      spawnTrash(gGridSize - 1, i)
+    end
+  end
+  for i = 2, gGridSize - 1 do
+    if math.random() < penultimatePerimSpawnChance then
+      spawnTrash(i, gGridSize - 1)
     end
   end
 end
 
-function handleSpawning(dt)
-  -- get all spaces neighboring spaces where there is currently trash
+-- gets all spaces neighboring spaces where there is currently trash
+function getAdjacentEmptySpaces()
   local adjacentEmptySpaces = {}
   for x = 1, G.size_x do
     for y = 1, G.size_y do
       local cell_data = G:get_cell(x, y)
-      if cell_data.t == "X" then
+      if cell_data.t == "X" and not cell_data.hit then
         for xn = -1, 1 do
           for yn = -1, 1 do
             if xn == 0 or yn == 0 then -- spread to manhattan spots only
@@ -89,7 +137,27 @@ function handleSpawning(dt)
       end
     end
   end
+  return adjacentEmptySpaces
+end
 
+function getAllEmptySpaces()
+  local allEmptySpaces = {}
+  for x = 1, G.size_x do
+    for y = 1, G.size_y do
+      local cell_data = G:get_cell(x, y)
+      if cell_data.t == "-" or cell_data.t == "BC" then
+        allEmptySpaces[#allEmptySpaces + 1] = { xpos = x, ypos = y }
+      end
+    end
+  end
+  return allEmptySpaces
+end
+
+function handleSpawning(dt)
+  -- get all spaces neighboring spaces where there is currently trash
+  local adjacentEmptySpaces = getAdjacentEmptySpaces()
+
+  -- spawn trash or bombsToCollect randomly near existing trash
   if math.random() < (gAdjacentTrashSpreadFactor * gTimeSinceLastAdjacentSpawn) then
     local spawnSpot = adjacentEmptySpaces[math.random(#adjacentEmptySpaces)]
     if spawnSpot ~= nil then
@@ -110,19 +178,32 @@ function handleSpawning(dt)
 
   -- just generate all spaces them every frame right now
   -- can optimize later by doing just when state changes
-  local allEmptySpaces = {}
-  for x = 1, G.size_x do
-    for y = 1, G.size_y do
-      local cell_data = G:get_cell(x, y)
-      if cell_data.t == "-" or cell_data.t == "BC" then
-        allEmptySpaces[#allEmptySpaces + 1] = { xpos = x, ypos = y }
+  local allEmptySpaces = getAllEmptySpaces()
+
+  -- find empty spaces near centers of walls along perimeter
+  local emptyCentralPerimeterSpaces = {}
+  for k,v in pairs(allEmptySpaces) do
+    local leftDenom = 2.66666
+    local rightDenom = 1.5
+    -- left/right walls
+    if v.xpos == 1 or v.xpos == gGridSize then
+      if v.ypos > math.floor(gGridSize/leftDenom) and v.ypos < math.floor(gGridSize/rightDenom) then
+        emptyCentralPerimeterSpaces[#emptyCentralPerimeterSpaces + 1] = { xpos = v.xpos, ypos = v.ypos }
+      end
+    end
+
+    -- top/bottom walls
+    if v.ypos == 1 or v.ypos == gGridSize then
+      if v.xpos > math.floor(gGridSize/leftDenom) and v.xpos < math.floor(gGridSize/rightDenom) then
+        emptyCentralPerimeterSpaces[#emptyCentralPerimeterSpaces + 1] = { xpos = v.xpos, ypos = v.ypos }
       end
     end
   end
 
-  -- rarely, spawn random new trash spots
+  -- rarely, spawn new trash in spots not adjacent to existing trash
+  -- and also only along central areas of the grid's perimeter
   if math.random() < (gNewTrashSpreadFactor * gTimeSinceLastTrashNewClusterSpawn) then
-    local spawnSpot = allEmptySpaces[math.random(#allEmptySpaces)]
+    local spawnSpot = emptyCentralPerimeterSpaces[math.random(#emptyCentralPerimeterSpaces)]
     if spawnSpot ~= nil then
       spawnTrash(spawnSpot.xpos, spawnSpot.ypos)
       gTimeSinceLastTrashNewClusterSpawn = 0
@@ -133,11 +214,37 @@ function handleSpawning(dt)
     gTimeSinceLastTrashNewClusterSpawn = gTimeSinceLastTrashNewClusterSpawn + dt
   end
 
+  -- spawn autobombs
+  if gTimeSinceLastRoundOfAutobombs > gDurBetweenAutobombRounds and gNumAutobombsPerRound > 0 then
+    for i = 1, gNumAutobombsPerRound do
+      -- re-query adjacent empty spots in case stuff spawned there already
+      adjacentEmptySpaces = getAdjacentEmptySpaces()
+      local spawnSpot = adjacentEmptySpaces[math.random(#adjacentEmptySpaces)]
+      if spawnSpot ~= nil then
+          spawnLitBomb(spawnSpot.xpos, spawnSpot.ypos)
+      end
+    end
+
+    gTimeSinceLastRoundOfAutobombs = 0
+  else
+    gTimeSinceLastRoundOfAutobombs = gTimeSinceLastRoundOfAutobombs + dt
+  end
+
   -- make it a little harder / different over time
   -- adjacent rises, new spawn slows
   if (gTimeSinceLastDifficultyIncrease > gDurOfEachDifficultyLvl) then
-    gNewTrashSpreadFactor = gNewTrashSpreadFactor - (gNewTrashSpreadFactor / 32)
+    gNewTrashSpreadFactor = gNewTrashSpreadFactor + (gNewTrashSpreadFactor / 32)
+
+    if gNewTrashSpreadFactor > NEW_SPREAD_FACTOR_MAX then
+      gNewTrashSpreadFactor = NEW_SPREAD_FACTOR_MAX
+    end
+
     gAdjacentTrashSpreadFactor = gAdjacentTrashSpreadFactor + (gAdjacentTrashSpreadFactor / 8)
+
+    if gAdjacentTrashSpreadFactor > ADJACENT_SPREAD_FACTOR_MAX then
+      gAdjacentTrashSpreadFactor = ADJACENT_SPREAD_FACTOR_MAX
+    end
+
     gTimeSinceLastDifficultyIncrease = 0
     gTimesDifficultyIncreased = gTimesDifficultyIncreased + 1
   else
@@ -207,7 +314,58 @@ function updateGame(dt)
     end
   end
 
+  removeAnyOrphanTrash()
+
   gElapsedTimeThisLevel = gElapsedTimeThisLevel + dt
+end
+
+-- removes all trash which does not have any
+-- trash-manhattan-neighbor path to the perimeter
+function removeAnyOrphanTrash()
+  for x = 1, G.size_x do
+    for y = 1, G.size_y do
+      local cell = G:get_cell(x, y)
+      if cell.t == "X" and cell.hit == false then
+        visited = {}
+        if not hasPathToPerimeter(cell, visited) then
+          -- 1000 is large for recurse as long as needed
+          destroyTrashAndItsPile(cell, 1000)
+        end
+      end
+    end
+  end
+end
+
+function hasPathToPerimeter(cell, visited)
+  if isAdjacentToWall(cell) then
+    return true
+  else
+    visited[#visited + 1] = cell
+    manhattan_neighbors = getManhattanNeighbors(cell)
+    for k,v in pairs(manhattan_neighbors) do
+      if v.t == "X" and not tableContainsCellAtLocation(visited, v.xpos, v.ypos) then
+        if hasPathToPerimeter(v, visited) then
+          return true
+        end
+      end
+    end
+    return false
+  end
+end
+
+function tableContainsCellAtLocation(theTable, x, y)
+  for k,v in pairs(theTable) do
+    if v.xpos == x and v.ypos == y then
+      return true
+    end
+  end
+  return false
+end
+
+function isAdjacentToWall(cell)
+  x = cell.xpos
+  y = cell.ypos
+  return x == 1 or y == 1 or x == gGridSize or y == gGridSize
 end
 
 function tryToMarkCollision(bk, ck)
@@ -230,9 +388,7 @@ function tryToMarkCollision(bk, ck)
   for x_to_check = (bomb_x - ((gCurrBombSpread - 1) / 2)), (bomb_x + ((gCurrBombSpread - 1) / 2)) do
     if G:is_valid(x_to_check, bomb_y) then
       if x_to_check == stuff_x and bomb_y == stuff_y then
-        gStuff[ck].hit = true
-        gStuffCleanedCount = gStuffCleanedCount + 1
-        markNeighborsAsHitRecursively(gStuff[ck], 0)
+        destroyTrashAndItsPile(gStuff[ck], gChainReactionFactor)
         return
       end
     end
@@ -241,34 +397,71 @@ function tryToMarkCollision(bk, ck)
   for y_to_check = (bomb_y - ((gCurrBombSpread - 1) / 2)), (bomb_y + ((gCurrBombSpread - 1) / 2)) do
     if G:is_valid(bomb_x, y_to_check) then
       if bomb_x == stuff_x and y_to_check == stuff_y then
-        gStuff[ck].hit = true
-        gStuffCleanedCount = gStuffCleanedCount + 1
-        markNeighborsAsHitRecursively(gStuff[ck], 0)
+        destroyTrashAndItsPile(gStuff[ck], gChainReactionFactor)
         return
       end
     end
   end
 end
 
+function destroyTrashAndItsPile(startingTrash, chainReactionFactor)
+  destroySingleTrash(startingTrash)
+  destroyManhattanNeighboringStuffRecursively(startingTrash, 0, chainReactionFactor)
+end
+
+function destroySingleTrash(trash)
+  trash.hit = true
+  gTrashCleanedCount = gTrashCleanedCount + 1
+  tryToAdvanceOnePhase()
+end
+
+function tryToAdvanceOnePhase()
+  -- todo: each phase, increase the rate of trash generation by a bit?
+  if gCurrPhase == 1 and gTrashCleanedCount >= gTrashNeededToLevelUp then
+    gNumAutobombsPerRound = 1
+    increaseGridSize(1)
+    gTrashNeededToLevelUp = gTrashNeededToLevelUp * 2
+    gCurrPhase = gCurrPhase + 1
+  elseif gCurrPhase == 2 and gTrashCleanedCount >= gTrashNeededToLevelUp then
+    gNumAutobombsPerRound = gNumAutobombsPerRound * 2
+    increaseGridSize(1)
+    gTrashNeededToLevelUp = gTrashNeededToLevelUp * 2
+    gCurrPhase = gCurrPhase + 1
+  elseif gCurrPhase >= 3 and gTrashCleanedCount >= gTrashNeededToLevelUp then
+    gNumAutobombsPerRound = gNumAutobombsPerRound * 2
+    increaseGridSize(1)
+    gTrashNeededToLevelUp = gTrashNeededToLevelUp * 2
+    gCurrPhase = gCurrPhase + 1
+  end
+
+end
+
+-- todo: do this later
+function increaseGridSize(increaseAmt)
+  -- gGridSize = gGridSize + increaseAmt
+  -- todo: resize not working? not sure why. could even be bug in grid class?
+  --G:resize(gGridSize, gGridSize)
+
+  -- spawn trash fully along new edges (as if to say, it was already there)
+  --for i = 1, gGridSize do spawnTrash(i, gGridSize) end
+  --for i = 1, gGridSize do spawnTrash(gGridSize, i) end
+end
+
 -- todo: consider doing breadth first, not depth first,
 -- if we want to limit the total blast radius of the bombs
-function markNeighborsAsHitRecursively(cell, numSoFar)
-
-  if numSoFar > gChainReactionFactor then
+function destroyManhattanNeighboringStuffRecursively(cell, numSoFar, maxDepth)
+  if numSoFar > maxDepth then
     return
   end
 
   manhattan_neighbors = getManhattanNeighbors(cell)
   for k,v in pairs(manhattan_neighbors) do
     if v.t == "X" and v.hit == false then
+      destroySingleTrash(v)
+      destroyManhattanNeighboringStuffRecursively(v, numSoFar + 1, gChainReactionFactor)
+    elseif v.t == "BC" and v.hit == false then
       v.hit = true
-      gStuffCleanedCount = gStuffCleanedCount + 1
-      markNeighborsAsHitRecursively(v, numSoFar + 1)
-    end
-    --todo: consider recursing only on trash
-    if v.t == "BC" and v.hit == false then
-      v.hit = true
-      markNeighborsAsHitRecursively(v, numSoFar + 1)
+      destroyManhattanNeighboringStuffRecursively(v, numSoFar + 1, gChainReactionFactor)
     end
   end
 end
@@ -384,7 +577,7 @@ function drawBg()
   end
 end
 
--- todo: clean this up, don't need for loops
+-- todo: clean this up, don't need loops
 function drawAllTrash()
   for x = 1, G.size_x do
     for y = 1, G.size_y do
@@ -396,7 +589,7 @@ function drawAllTrash()
   end
 end
 
--- todo: clean this up, don't need for loops
+-- todo: clean this up, don't need loops
 function drawLitBombs()
   for x = 1, G.size_x do
     for y = 1, G.size_y do
@@ -429,8 +622,31 @@ function drawBombsToCollect()
 end
 
 function drawCursor()
-  love.graphics.setColor(0.4, 1.0, 0.4, 1.0)
-  love.graphics.rectangle("line", (gMousehoverCellX-1) * gSquareW, (gMousehoverCellY-1) * gSquareW, gSquareW, gSquareW)
+
+  if not G:is_valid(gMousehoverCellX, gMousehoverCellY) then
+    return
+  end
+
+  cell = G:get_cell(gMousehoverCellX, gMousehoverCellY)
+
+  if cell.t == "-" and gCurrBombSupply > 0 then
+    love.graphics.setColor(1.0, 0.4, 0.4, 0.5)
+    love.graphics.circle("fill", (gMousehoverCellX-1) * gSquareW + (0.5 * gSquareW),
+                                 (gMousehoverCellY-1) * gSquareW + (0.5 * gSquareW),
+                                 gSquareW / 2)
+    love.graphics.setColor(1.0, 1.0, 1.0, 1.0)
+    love.graphics.print(gCurrBombSupply,
+                       (gMousehoverCellX-1) * gSquareW + (0.5 * gSquareW),
+                       (gMousehoverCellY-1) * gSquareW + (0.5 * gSquareW))
+  elseif cell.t == "BC" then
+    love.graphics.setColor(0.4, 1.0, 0.4, 1.0)
+    love.graphics.circle("line", (gMousehoverCellX-1) * gSquareW + (0.5 * gSquareW),
+                                 (gMousehoverCellY-1) * gSquareW + (0.5 * gSquareW),
+                                 gSquareW / 2)
+  else
+    love.graphics.setColor(0.4, 0.4, 0.4, 0.25)
+    love.graphics.rectangle("fill", (gMousehoverCellX-1) * gSquareW, (gMousehoverCellY-1) * gSquareW, gSquareW, gSquareW)
+  end
 end
 
 function love.draw()
@@ -442,9 +658,40 @@ function love.draw()
     drawBombsToCollect()
     drawLitBombs()
     drawCursor()
-    love.graphics.print(gCurrBombSupply, gGridSize * gSquareW + 20, gSquareW / 2 - 5)
-    love.graphics.print("Trash cleaned: "..gStuffCleanedCount, gGridSize * gSquareW + 20, 2 * (gSquareW / 2) - 5)
+    drawHUD()
   end
+end
+
+function drawHUD()
+  -- progress bar
+  love.graphics.setColor(1.0, 0.4, 0.4, 1.0)
+  love.graphics.rectangle("fill",
+                          0, (gGridSize * gSquareW), -- x, y
+                          (trashSoFarThisLevel() / trashGoalNeededWithinCurrLevel()) * (gGridSize * gSquareW), -- width
+                          gSquareW / 2) -- height
+  -- Text
+  love.graphics.setColor(1.0, 1.0, 1.0, 1.0)
+  love.graphics.print("Trash cleaned: "..gTrashCleanedCount, gGridSize * gSquareW + 20, 2 * (gSquareW / 2) - 5)
+  gNumAutobombsPerRound
+  if gNumAutobombsPerRound > 0 then
+    love.graphics.print(gNumAutobombsPerRound, gGridSize * gSquareW + 20, gSquareW / 2 - 5)
+  end
+end
+
+function totalTrashThroughPrevLevel()
+  local totalTrashThroughPrevLevel = (gTrashNeededToLevelUp / 2)
+  if gCurrPhase == 1 then
+    totalTrashThroughPrevLevel = 0
+  end
+  return totalTrashThroughPrevLevel
+end
+
+function trashSoFarThisLevel()
+  return gTrashCleanedCount - totalTrashThroughPrevLevel()
+end
+
+function trashGoalNeededWithinCurrLevel()
+  return gTrashNeededToLevelUp - totalTrashThroughPrevLevel()
 end
 
 function checkRoomFullyCleaned()
@@ -466,28 +713,28 @@ function checkRoomFullyCleaned()
 
   if completed then
     -- todo: give fully clean bonus
-
+    -- or just display a temporary message of congrats... hrmf
   end
 end
 
 function checkGameOver()
-  local allSpotsTrash = true
+  local allSpotsTaken = true
 
   -- Fail iff any trash present
   for x = 1, G.size_x do
     for y = 1, G.size_y do
       local cell_data = G:get_cell(x, y)
-      if cell_data.t ~= "X" then
-        allSpotsTrash = false
+      if cell_data.t == "-" or cell_data.t == "B" then
+        allSpotsTaken = false
         break
       end
     end
-    if not allSpotsTrash then
+    if not allSpotsTaken then
       break
     end
   end
 
-  if allSpotsTrash then
+  if allSpotsTaken then
     -- todo: write out high score
     G:reset_all()
     gGameStarted = false
@@ -525,10 +772,6 @@ end
 
 -- For key names, see: https://love2d.org/wiki/KeyConstant
 function love.keypressed(key, scancode, isrepeat)
-  if key == "e" then
-    G:reset_all()
-    gGameStarted = false
-  end
 end
 
 function tryToCollectBomb(x, y)
@@ -560,11 +803,23 @@ function spawnBombToCollect(x, y)
   G:set_cell(x, y, { t = "BC", xpos = x, ypos = y, hit = false, time_until_vanquished = gDurUntilStuffVanquished })
 end
 
+function spawnLitBomb(x, y)
+  G:set_cell(x, y, { t = "B", xpos = x, ypos = y, exploded = false, time_until_explode = gBombDurUntilExplode, time_since_exploded = gBombExplosionDur })
+end
+
 function getCellAtPoint(mouse_x, mouse_y)
   -- lua doesn't do interger division, it just gives the accurate value, so we floor
   cell_x = math.floor(mouse_x / gSquareW) + 1 -- grid is 1-indexed
   cell_y = math.floor(mouse_y / gSquareW) + 1 -- grid is 1-indexed
   return cell_x, cell_y
+end
+
+function fillGridWithEmptySpots()
+  for x = 1, G.size_x do
+    for y = 1, G.size_y do
+      G:set_cell( { t = "-", xpos = x, ypos = y } )
+    end
+  end
 end
 
 -- makes a recurisve deep copy of a table and its metatables
