@@ -18,11 +18,12 @@ local gDurUntilStuffVanquished = gBombExplosionDur
 
 -- Phases + Upgrades
 local gCurrPhase = 1
-local gTrashNeededToLevelUp = 256
+local gTrashNeededToLevelUp = 128
 local gNumAutobombsPerRound = 0
 local gDurBetweenAutobombRounds = 5 -- seconds
 local gTimeSinceLastRoundOfAutobombs = 0 -- seconds
-MAX_NUM_AUTOBOMBS = 3
+MAX_NUM_AUTOBOMBS = 1
+TRASH_NEEDED_TO_LVL_UP_FACTOR = 1.73 -- how much trash each level is vs previous
 
 -- num squares bomb will explode on each axis,
 -- including the square on which it is laid
@@ -33,7 +34,7 @@ local gCurrBombSupply = 0
 local gMousehoverCellX = 0
 local gMousehoverCellY = 0
 
-local gBombToCollectSpawnProbability = 0.05 -- probability of a bomb spawning adjacent rather than trash
+local gBombToCollectSpawnProbability = 0.04 -- probability of a bomb spawning adjacent rather than trash
 
 local gTimeSinceLastDifficultyIncrease = 0
 local gDurOfEachDifficultyLvl = 1 -- interval after which it gets a little harder
@@ -48,7 +49,7 @@ local gTotalElapsedTime = 0
 local gElapsedTimeCurrGame = 0
 
 -- torture people
-TIME_OF_ENVIRONMENT = 100 -- seconds in
+TIME_OF_ENVIRONMENT = 45 -- seconds in
 
 -- Use a square grid of tables, each table has a type "t".
 -- Each type has unique table data associated with it
@@ -70,6 +71,10 @@ gNewSpreadFactorMax = 0.5
 
 function love.load()
   math.randomseed(os.time())
+
+  -- font
+  local theFont = love.graphics.newFont("8bitwonder.ttf", 18)
+  love.graphics.setFont(theFont)
 
   -- images
   gImgTitleScreen1 = love.graphics.newImage("title_screen_1.png")
@@ -105,12 +110,13 @@ function startGame()
   gCurrPhase = 1
   gCurrBombSpread = 3
   gNumAutobombsPerRound = 0
-  gTrashNeededToLevelUp = 256
+  gTrashNeededToLevelUp = 128
   gNewTrashSpreadFactor = INITIAL_NEW_SPREAD_FACTOR
   gAdjacentTrashSpreadFactor = INITIAL_ADJACENT_SPREAD_FACTOR
   gTrashCleanedCount = 0
   gCurrBombSupply = 0
   gElapsedTimeCurrGame = 0
+  gBombToCollectSpawnProbability = 0.04
 
   gAdjacentSpreadFactorMax = 10.0
   gNewSpreadFactorMax = 0.5
@@ -477,11 +483,11 @@ function tryToAdvanceOnePhase()
   -- todo: each phase, increase the rate of trash generation by a bit?
   local shouldAdvance = false
   if gCurrPhase == 1 and gTrashCleanedCount >= gTrashNeededToLevelUp then
-    gNumAutobombsPerRound = 1
+    gNumAutobombsPerRound = 0
     increaseGridSize(1)
     shouldAdvance = true
   elseif gCurrPhase == 2 and gTrashCleanedCount >= gTrashNeededToLevelUp then
-    gNumAutobombsPerRound = gNumAutobombsPerRound + 1
+    gNumAutobombsPerRound = 0
     increaseGridSize(1)
     shouldAdvance = true
   elseif gCurrPhase >= 3 and gTrashCleanedCount >= gTrashNeededToLevelUp then
@@ -494,8 +500,9 @@ function tryToAdvanceOnePhase()
   end
 
   if shouldAdvance then
-    gTrashNeededToLevelUp = gTrashNeededToLevelUp * 2
+    gTrashNeededToLevelUp = gTrashNeededToLevelUp * TRASH_NEEDED_TO_LVL_UP_FACTOR
     gCurrPhase = gCurrPhase + 1
+    gBombToCollectSpawnProbability = gBombToCollectSpawnProbability * 0.98
 
     -- make it bit harder
     gAdjacentSpreadFactorMax = gAdjacentSpreadFactorMax * 2
@@ -706,7 +713,7 @@ function drawCursor()
                                  gSquareW / 2)
     love.graphics.setColor(1.0, 1.0, 1.0, 1.0)
     love.graphics.print(gCurrBombSupply,
-                       (gMousehoverCellX-1) * gSquareW + (0.5 * gSquareW)-5,
+                       (gMousehoverCellX-1) * gSquareW + (0.5 * gSquareW)-10,
                        (gMousehoverCellY-1) * gSquareW + (0.5 * gSquareW)-25)
   elseif cell.t == "BC" then
     love.graphics.setColor(0.4, 1.0, 0.4, 1.0)
@@ -741,14 +748,14 @@ function drawHUD()
                           gSquareW / 2) -- height
   -- Text
   love.graphics.setColor(1.0, 1.0, 1.0, 1.0)
-  love.graphics.print("Trash: "..gTrashCleanedCount, gGridSize * gSquareW + 20, (gSquareW / 2) - 5)
+  love.graphics.print("Trash     "..gTrashCleanedCount, gGridSize * gSquareW + 20, (gSquareW / 2) - 5)
   if gNumAutobombsPerRound > 0 then
-    love.graphics.print("Autobombs: "..gNumAutobombsPerRound, gGridSize * gSquareW + 20, 2 * (gSquareW / 2) - 5)
+    love.graphics.print("Autobombs  "..gNumAutobombsPerRound, gGridSize * gSquareW + 20, 2 * (gSquareW / 2) - 5)
   end
 end
 
 function totalTrashThroughPrevLevel()
-  local totalTrashThroughPrevLevel = (gTrashNeededToLevelUp / 2)
+  local totalTrashThroughPrevLevel = (gTrashNeededToLevelUp / TRASH_NEEDED_TO_LVL_UP_FACTOR)
   if gCurrPhase == 1 then
     totalTrashThroughPrevLevel = 0
   end
@@ -853,6 +860,14 @@ end
 
 function tryToCollectBomb(x, y)
   local cell = G:get_cell(x, y)
+
+  -- without this hack, the game can crash when clicking on
+  -- the exact right edge of the window. todo: find out exactly
+  -- why that's possible
+  if cell == nil then
+    return
+  end
+
   if cell.t == "BC" then
     gCurrBombSupply = gCurrBombSupply + 1
     cell.t = "-"
@@ -867,7 +882,16 @@ function tryToCollectBomb(x, y)
 end
 
 function tryToLayBomb(x, y)
-  isSpaceEmpty = G:get_cell(x, y).t == "-"
+  cell = G:get_cell(x, y)
+
+  -- without this hack, the game can crash when clicking on
+  -- the exact right edge of the window. todo: find out exactly
+  -- why that's possible
+  if cell == nil then
+    return
+  end
+
+  isSpaceEmpty = cell.t == "-"
   playerHasBombsLeft = gCurrBombSupply > 0
   if isSpaceEmpty and playerHasBombsLeft then
     G:set_cell(x, y, { t = "B", xpos = x, ypos = y, exploded = false, time_until_explode = gBombDurUntilExplode, time_since_exploded = gBombExplosionDur })
