@@ -757,7 +757,9 @@ function love.draw()
   if not gGameStarted then
     love.graphics.draw(gImgCurrTitleScreen, 0, 0)
     love.graphics.setColor(167.0/255.0, 131.0/255.0, 95.0/255.0, 1.0)
-    love.graphics.print("High Score  "..HiScore:get(), 10, (gGridSize * gSquareW) + 10)
+    if HiScore:get() > 0 then
+      love.graphics.print("High Score  "..HiScore:get(), 10, (gGridSize * gSquareW) + 10)
+    end
   else
     drawBg()
     drawAllTrash()
@@ -779,7 +781,7 @@ function drawHUD()
   love.graphics.setColor(167.0/255.0, 131.0/255.0, 95.0/255.0, 1.0)
   love.graphics.print("Trash      "..gTrashCleanedCount, 10, (gGridSize * gSquareW) + (gSquareW / 3) + 10)
   if gNumAutobombsPerRound > 0 then
-    love.graphics.print("Autobombs  "..gNumAutobombsPerRound, 10, (gGridSize * gSquareW) + (gSquareW / 3) + 10 + 20)
+    love.graphics.print("Autobombs  "..gNumAutobombsPerRound, 10, (gGridSize * gSquareW) + (gSquareW / 3) + 10 + 24)
   end
 end
 
