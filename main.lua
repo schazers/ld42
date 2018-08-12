@@ -13,8 +13,8 @@ local gCellBombColorExploding = { 0.8, 0.4, 0.15, 1.0 }
 local gGridSize = 16
 local gGameStarted = false
 local gGameOver = false
-local gBombDurUntilExplode = 0.24
-local gBombExplosionDur = 0.32
+local gBombDurUntilExplode = 0.17
+local gBombExplosionDur = 0.28
 local gDurUntilStuffVanquished = gBombExplosionDur
 
 -- Phases + Upgrades
