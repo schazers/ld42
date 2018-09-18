@@ -76,7 +76,7 @@ function love.load()
   HiScore:load()
 
   -- font
-  gTheFont = love.graphics.newFont("8bitwonder.ttf", 18)
+  gTheFont = love.graphics.newFont("8bitwonder.TTF", 18)
 
   -- images
   gImgTitleScreen1 = love.graphics.newImage("title_screen_1.png")
