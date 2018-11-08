@@ -753,6 +753,12 @@ function drawCursor()
 end
 
 function love.draw()
+  -- center game within castle window
+  love.graphics.push()
+  gTranslateScreenToCenterDx = 0.5 * (love.graphics.getWidth() - gGridSize*gSquareW)
+  gTranslateScreenToCenterDy = 0.5 * (love.graphics.getHeight() - gGridSize*gSquareW)
+  love.graphics.translate(gTranslateScreenToCenterDx, gTranslateScreenToCenterDy)
+  
   -- call setFont only inside .draw or it will set Ghost's font
   love.graphics.setFont(gTheFont)
   if not gGameStarted then
@@ -769,6 +775,8 @@ function love.draw()
     drawCursor()
     drawHUD()
   end
+  
+  love.graphics.pop()
 end
 
 function drawHUD()
