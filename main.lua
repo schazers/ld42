@@ -860,7 +860,7 @@ end
 
 function love.mousepressed(x, y, button)
   -- disallow clicks out of bounds
-  if x > gGridSize * gSquareW or y > gGridSize * gSquareW then
+  if (x - gTranslateScreenToCenterDx) > gGridSize * gSquareW or (y - gTranslateScreenToCenterDx) > gGridSize * gSquareW then
     return
   end
 
