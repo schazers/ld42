@@ -871,11 +871,11 @@ function love.mousepressed(x, y, button)
 
   -- check if mouse out of bounds
   local numPixelsInGridWidth = (gGridSize * gSquareW)
-  if x > numPixelsInGridWidth or y > numPixelsInGridWidth then
+  if (x - gTranslateScreenToCenterDx) > numPixelsInGridWidth or (y - gTranslateScreenToCenterDy) > numPixelsInGridWidth then
     return
   end
 
-  cell_x, cell_y = getCellAtPoint(x, y)
+  cell_x, cell_y = getCellAtPoint(x - gTranslateScreenToCenterDx, y - gTranslateScreenToCenterDy)
   if button == 1 then
     if not tryToCollectBomb(cell_x, cell_y) then
       tryToLayBomb(cell_x, cell_y)
@@ -888,7 +888,7 @@ function love.mousemoved(x, y, dx, dy, istouch)
     return
   end
 
-  gMousehoverCellX, gMousehoverCellY = getCellAtPoint(x, y)
+  gMousehoverCellX, gMousehoverCellY = getCellAtPoint(x - gTranslateScreenToCenterDx, y - gTranslateScreenToCenterDy)
 end
 
 -- For key names, see: https://love2d.org/wiki/KeyConstant
