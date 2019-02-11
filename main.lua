@@ -76,7 +76,7 @@ function love.load()
   HiScore:load()
 
   -- font
-  gTheFont = love.graphics.newFont("8bitwonder.ttf", 18)
+  gTheFont = love.graphics.newFont("8bitwonder.TTF", 18)
 
   -- images
   gImgTitleScreen1 = love.graphics.newImage("title_screen_1.png")
@@ -753,6 +753,12 @@ function drawCursor()
 end
 
 function love.draw()
+  -- center game within castle window
+  love.graphics.push()
+  gTranslateScreenToCenterDx = 0.5 * (love.graphics.getWidth() - gGridSize*gSquareW)
+  gTranslateScreenToCenterDy = 0.5 * (love.graphics.getHeight() - gGridSize*gSquareW)
+  love.graphics.translate(gTranslateScreenToCenterDx, gTranslateScreenToCenterDy)
+  
   -- call setFont only inside .draw or it will set Ghost's font
   love.graphics.setFont(gTheFont)
   if not gGameStarted then
@@ -769,6 +775,8 @@ function love.draw()
     drawCursor()
     drawHUD()
   end
+  
+  love.graphics.pop()
 end
 
 function drawHUD()
@@ -852,7 +860,7 @@ end
 
 function love.mousepressed(x, y, button)
   -- disallow clicks out of bounds
-  if x > gGridSize * gSquareW or y > gGridSize * gSquareW then
+  if (x - gTranslateScreenToCenterDx) > gGridSize * gSquareW or (y - gTranslateScreenToCenterDx) > gGridSize * gSquareW then
     return
   end
 
@@ -863,11 +871,11 @@ function love.mousepressed(x, y, button)
 
   -- check if mouse out of bounds
   local numPixelsInGridWidth = (gGridSize * gSquareW)
-  if x > numPixelsInGridWidth or y > numPixelsInGridWidth then
+  if (x - gTranslateScreenToCenterDx) > numPixelsInGridWidth or (y - gTranslateScreenToCenterDy) > numPixelsInGridWidth then
     return
   end
 
-  cell_x, cell_y = getCellAtPoint(x, y)
+  cell_x, cell_y = getCellAtPoint(x - gTranslateScreenToCenterDx, y - gTranslateScreenToCenterDy)
   if button == 1 then
     if not tryToCollectBomb(cell_x, cell_y) then
       tryToLayBomb(cell_x, cell_y)
@@ -880,7 +888,7 @@ function love.mousemoved(x, y, dx, dy, istouch)
     return
   end
 
-  gMousehoverCellX, gMousehoverCellY = getCellAtPoint(x, y)
+  gMousehoverCellX, gMousehoverCellY = getCellAtPoint(x - gTranslateScreenToCenterDx, y - gTranslateScreenToCenterDy)
 end
 
 -- For key names, see: https://love2d.org/wiki/KeyConstant
