@@ -1,7 +1,8 @@
 ---
 main: main.lua
-name: Trash Simulator
-username: schazers
+title: Trash Simulator
+owner: schazers
+primaryColor: 313131
 coverImage: title_screen_1.png
 description: A ridiculous and abandoned game I made for Ludum Dare 42. The LD42 theme was \"Running out of Space.\"
 
